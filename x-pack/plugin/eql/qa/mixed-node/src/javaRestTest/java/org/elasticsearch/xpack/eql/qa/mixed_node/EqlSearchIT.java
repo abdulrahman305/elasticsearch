@@ -11,8 +11,6 @@ import org.apache.http.HttpHost;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
-import org.elasticsearch.cluster.metadata.IndexMetadata;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.test.NotEqualMessageBuilder;
 import org.elasticsearch.test.rest.ESRestTestCase;
@@ -49,6 +47,8 @@ import static org.elasticsearch.xpack.ql.TestUtils.readResource;
  */
 public class EqlSearchIT extends ESRestTestCase {
 
+    private static final String BWC_NODES_VERSION = System.getProperty("tests.bwc_nodes_version");
+
     private static final String index = "test_eql_mixed_versions";
     private static int numShards;
     private static int numReplicas = 1;
@@ -59,21 +59,14 @@ public class EqlSearchIT extends ESRestTestCase {
 
     @Before
     public void createIndex() throws IOException {
-        nodes = buildNodeAndVersions(client());
+        nodes = buildNodeAndVersions(client(), BWC_NODES_VERSION);
         numShards = nodes.size();
         numDocs = randomIntBetween(numShards, 15);
         newNodes = new ArrayList<>(nodes.getNewNodes());
         bwcNodes = new ArrayList<>(nodes.getBWCNodes());
 
         String mappings = readResource(EqlSearchIT.class.getResourceAsStream("/eql_mapping.json"));
-        createIndex(
-            index,
-            Settings.builder()
-                .put(IndexMetadata.INDEX_NUMBER_OF_SHARDS_SETTING.getKey(), numShards)
-                .put(IndexMetadata.SETTING_NUMBER_OF_REPLICAS, numReplicas)
-                .build(),
-            mappings
-        );
+        createIndex(index, indexSettings(numShards, numReplicas).build(), mappings);
     }
 
     @After

@@ -41,6 +41,11 @@ public interface TopNEncoder {
      */
     VersionTopNEncoder VERSION = new VersionTopNEncoder();
 
+    /**
+     * Placeholder encoder for unsupported data types.
+     */
+    UnsupportedTypesTopNEncoder UNSUPPORTED = new UnsupportedTypesTopNEncoder();
+
     void encodeLong(long value, BreakingBytesRefBuilder bytesRefBuilder);
 
     long decodeLong(BytesRef bytes);
@@ -48,6 +53,10 @@ public interface TopNEncoder {
     void encodeInt(int value, BreakingBytesRefBuilder bytesRefBuilder);
 
     int decodeInt(BytesRef bytes);
+
+    void encodeFloat(float value, BreakingBytesRefBuilder bytesRefBuilder);
+
+    float decodeFloat(BytesRef bytes);
 
     void encodeDouble(double value, BreakingBytesRefBuilder bytesRefBuilder);
 

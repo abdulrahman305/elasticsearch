@@ -350,7 +350,7 @@ public class IndexFoldersDeletionListenerIT extends ESIntegTestCase {
 
                 @Override
                 public void beforeShardFoldersDeleted(ShardId shardId, IndexSettings indexSettings, Path[] shardPaths) {
-                    deletedShards.computeIfAbsent(shardId.getIndex(), i -> new ArrayList<>()).add(shardId);
+                    deletedShards.computeIfAbsent(shardId.getIndex(), i -> Collections.synchronizedList(new ArrayList<>())).add(shardId);
                 }
             });
         }
@@ -363,7 +363,8 @@ public class IndexFoldersDeletionListenerIT extends ESIntegTestCase {
 
     private static IndexFoldersDeletionListenerPlugin plugin(String nodeId) {
         final PluginsService pluginsService = internalCluster().getInstance(PluginsService.class, nodeId);
-        final List<IndexFoldersDeletionListenerPlugin> plugins = pluginsService.filterPlugins(IndexFoldersDeletionListenerPlugin.class);
+        final List<IndexFoldersDeletionListenerPlugin> plugins = pluginsService.filterPlugins(IndexFoldersDeletionListenerPlugin.class)
+            .toList();
         assertThat(plugins, hasSize(1));
         return plugins.get(0);
     }

@@ -11,17 +11,18 @@ package org.elasticsearch.rest.root;
 import org.elasticsearch.Build;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
-import org.elasticsearch.action.support.HandledTransportAction;
+import org.elasticsearch.action.support.TransportAction;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.index.IndexVersion;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.transport.TransportService;
 
-public class TransportMainAction extends HandledTransportAction<MainRequest, MainResponse> {
+public class TransportMainAction extends TransportAction<MainRequest, MainResponse> {
 
     private final String nodeName;
     private final ClusterService clusterService;
@@ -33,7 +34,7 @@ public class TransportMainAction extends HandledTransportAction<MainRequest, Mai
         ActionFilters actionFilters,
         ClusterService clusterService
     ) {
-        super(MainAction.NAME, transportService, actionFilters, MainRequest::new);
+        super(MainRestPlugin.MAIN_ACTION.name(), actionFilters, transportService.getTaskManager(), EsExecutors.DIRECT_EXECUTOR_SERVICE);
         this.nodeName = Node.NODE_NAME_SETTING.get(settings);
         this.clusterService = clusterService;
     }

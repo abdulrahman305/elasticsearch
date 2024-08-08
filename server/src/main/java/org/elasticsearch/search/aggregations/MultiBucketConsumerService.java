@@ -13,6 +13,8 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.logging.LogManager;
+import org.elasticsearch.logging.Logger;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.search.aggregations.bucket.BucketsAggregator;
 import org.elasticsearch.xcontent.XContentBuilder;
@@ -23,7 +25,7 @@ import java.util.function.IntConsumer;
 /**
  * An aggregation service that creates instances of {@link MultiBucketConsumer}.
  * The consumer is used by {@link BucketsAggregator} and {@link InternalMultiBucketAggregation} to limit the number of buckets created
- * in {@link Aggregator#buildAggregations} and {@link InternalAggregation#reduce}.
+ * in {@link Aggregator#buildAggregations} and {@link InternalAggregation#getReducer(AggregationReduceContext, int)}.
  * The limit can be set by changing the `search.max_buckets` cluster setting and defaults to 65536.
  */
 public class MultiBucketConsumerService {
@@ -64,6 +66,11 @@ public class MultiBucketConsumerService {
         }
 
         @Override
+        public Throwable fillInStackTrace() {
+            return this; // this exception doesn't imply a bug, no need for a stack trace
+        }
+
+        @Override
         protected void writeTo(StreamOutput out, Writer<Throwable> nestedExceptionsWriter) throws IOException {
             super.writeTo(out, nestedExceptionsWriter);
             out.writeInt(maxBuckets);
@@ -88,9 +95,10 @@ public class MultiBucketConsumerService {
      * An {@link IntConsumer} that throws a {@link TooManyBucketsException}
      * when the sum of the provided values is above the limit (`search.max_buckets`).
      * It is used by aggregators to limit the number of bucket creation during
-     * {@link Aggregator#buildAggregations} and {@link InternalAggregation#reduce}.
+     * {@link Aggregator#buildAggregations} and {@link InternalAggregation#getReducer(AggregationReduceContext, int)}.
      */
     public static class MultiBucketConsumer implements IntConsumer {
+        private static final Logger logger = LogManager.getLogger(MultiBucketConsumer.class);
         private final int limit;
         private final CircuitBreaker breaker;
 
@@ -108,6 +116,7 @@ public class MultiBucketConsumerService {
             if (value != 0) {
                 count += value;
                 if (count > limit) {
+                    logger.warn("Too many buckets (max [{}], count [{}])", limit, count);
                     throw new TooManyBucketsException(
                         "Trying to create too many buckets. Must be less than or equal to: ["
                             + limit
@@ -130,8 +139,35 @@ public class MultiBucketConsumerService {
         }
     }
 
-    public MultiBucketConsumer create() {
+    /**
+     * Similar to {@link MultiBucketConsumer} but it only checks the parent circuit breaker every 1024 calls.
+     * It provides protection for OOM during partial reductions.
+     */
+    private static class MultiBucketConsumerPartialReduction implements IntConsumer {
+        private final CircuitBreaker breaker;
+
+        // aggregations execute in a single thread so no atomic here
+        private int callCount = 0;
+
+        private MultiBucketConsumerPartialReduction(CircuitBreaker breaker) {
+            this.breaker = breaker;
+        }
+
+        @Override
+        public void accept(int value) {
+            // check parent circuit breaker every 1024 calls
+            if ((++callCount & 0x3FF) == 0) {
+                breaker.addEstimateBytesAndMaybeBreak(0, "allocated_buckets");
+            }
+        }
+    }
+
+    public IntConsumer createForFinal() {
         return new MultiBucketConsumer(maxBucket, breaker);
+    }
+
+    public IntConsumer createForPartial() {
+        return new MultiBucketConsumerPartialReduction(breaker);
     }
 
     public int getLimit() {

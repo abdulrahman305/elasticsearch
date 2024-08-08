@@ -11,59 +11,58 @@ import org.elasticsearch.ElasticsearchStatusException;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.HandledTransportAction;
-import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.inference.InferenceService;
+import org.elasticsearch.inference.InferenceServiceRegistry;
+import org.elasticsearch.inference.Model;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.tasks.Task;
-import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
-import org.elasticsearch.xpack.inference.Model;
-import org.elasticsearch.xpack.inference.UnparsedModel;
+import org.elasticsearch.xpack.core.inference.action.InferenceAction;
 import org.elasticsearch.xpack.inference.registry.ModelRegistry;
-import org.elasticsearch.xpack.inference.registry.ServiceRegistry;
-import org.elasticsearch.xpack.inference.services.InferenceService;
+import org.elasticsearch.xpack.inference.telemetry.InferenceStats;
 
 public class TransportInferenceAction extends HandledTransportAction<InferenceAction.Request, InferenceAction.Response> {
 
     private final ModelRegistry modelRegistry;
-    private final ServiceRegistry serviceRegistry;
+    private final InferenceServiceRegistry serviceRegistry;
+    private final InferenceStats inferenceStats;
 
     @Inject
     public TransportInferenceAction(
-        Settings settings,
         TransportService transportService,
-        ClusterService clusterService,
-        ThreadPool threadPool,
         ActionFilters actionFilters,
         ModelRegistry modelRegistry,
-        ServiceRegistry serviceRegistry
+        InferenceServiceRegistry serviceRegistry,
+        InferenceStats inferenceStats
     ) {
-        super(InferenceAction.NAME, transportService, actionFilters, InferenceAction.Request::new);
+        super(InferenceAction.NAME, transportService, actionFilters, InferenceAction.Request::new, EsExecutors.DIRECT_EXECUTOR_SERVICE);
         this.modelRegistry = modelRegistry;
         this.serviceRegistry = serviceRegistry;
+        this.inferenceStats = inferenceStats;
     }
 
     @Override
     protected void doExecute(Task task, InferenceAction.Request request, ActionListener<InferenceAction.Response> listener) {
 
-        ActionListener<ModelRegistry.ModelConfigMap> getModelListener = ActionListener.wrap(modelConfigMap -> {
-            var unparsedModel = UnparsedModel.unparsedModelFromMap(modelConfigMap.config());
+        ActionListener<ModelRegistry.UnparsedModel> getModelListener = listener.delegateFailureAndWrap((delegate, unparsedModel) -> {
             var service = serviceRegistry.getService(unparsedModel.service());
             if (service.isEmpty()) {
-                listener.onFailure(
+                delegate.onFailure(
                     new ElasticsearchStatusException(
                         "Unknown service [{}] for model [{}]. ",
                         RestStatus.INTERNAL_SERVER_ERROR,
                         unparsedModel.service(),
-                        unparsedModel.modelId()
+                        unparsedModel.inferenceEntityId()
                     )
                 );
                 return;
             }
 
-            if (request.getTaskType() != unparsedModel.taskType()) {
-                listener.onFailure(
+            if (request.getTaskType().isAnyOrSame(unparsedModel.taskType()) == false) {
+                // not the wildcard task type and not the model task type
+                delegate.onFailure(
                     new ElasticsearchStatusException(
                         "Incompatible task_type, the requested type [{}] does not match the model type [{}]",
                         RestStatus.BAD_REQUEST,
@@ -74,11 +73,18 @@ public class TransportInferenceAction extends HandledTransportAction<InferenceAc
                 return;
             }
 
-            var model = service.get().parseConfigLenient(unparsedModel.modelId(), unparsedModel.taskType(), unparsedModel.settings());
-            inferOnService(model, request, service.get(), listener);
-        }, listener::onFailure);
+            var model = service.get()
+                .parsePersistedConfigWithSecrets(
+                    unparsedModel.inferenceEntityId(),
+                    unparsedModel.taskType(),
+                    unparsedModel.settings(),
+                    unparsedModel.secrets()
+                );
+            inferenceStats.incrementRequestCount(model);
+            inferOnService(model, request, service.get(), delegate);
+        });
 
-        modelRegistry.getUnparsedModelMap(request.getModelId(), getModelListener);
+        modelRegistry.getModelWithSecrets(request.getInferenceEntityId(), getModelListener);
     }
 
     private void inferOnService(
@@ -87,8 +93,14 @@ public class TransportInferenceAction extends HandledTransportAction<InferenceAc
         InferenceService service,
         ActionListener<InferenceAction.Response> listener
     ) {
-        service.infer(model, request.getInput(), request.getTaskSettings(), ActionListener.wrap(inferenceResult -> {
-            listener.onResponse(new InferenceAction.Response(inferenceResult));
-        }, listener::onFailure));
+        service.infer(
+            model,
+            request.getQuery(),
+            request.getInput(),
+            request.getTaskSettings(),
+            request.getInputType(),
+            request.getInferenceTimeout(),
+            listener.delegateFailureAndWrap((l, inferenceResults) -> l.onResponse(new InferenceAction.Response(inferenceResults)))
+        );
     }
 }

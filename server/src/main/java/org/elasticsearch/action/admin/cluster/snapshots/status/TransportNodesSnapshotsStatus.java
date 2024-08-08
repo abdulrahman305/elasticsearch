@@ -48,8 +48,8 @@ public class TransportNodesSnapshotsStatus extends TransportNodesAction<
     TransportNodesSnapshotsStatus.NodeRequest,
     TransportNodesSnapshotsStatus.NodeSnapshotStatus> {
 
-    public static final String ACTION_NAME = SnapshotsStatusAction.NAME + "[nodes]";
-    public static final ActionType<NodesSnapshotStatus> TYPE = new ActionType<>(ACTION_NAME, NodesSnapshotStatus::new);
+    public static final String ACTION_NAME = TransportSnapshotsStatusAction.TYPE.name() + "[nodes]";
+    public static final ActionType<NodesSnapshotStatus> TYPE = new ActionType<>(ACTION_NAME);
 
     private final SnapshotShardsService snapshotShardsService;
 
@@ -63,11 +63,9 @@ public class TransportNodesSnapshotsStatus extends TransportNodesAction<
     ) {
         super(
             ACTION_NAME,
-            threadPool,
             clusterService,
             transportService,
             actionFilters,
-            Request::new,
             NodeRequest::new,
             threadPool.executor(ThreadPool.Names.GENERIC)
         );
@@ -95,15 +93,15 @@ public class TransportNodesSnapshotsStatus extends TransportNodesAction<
         try {
             final String nodeId = clusterService.localNode().getId();
             for (Snapshot snapshot : request.snapshots) {
-                Map<ShardId, IndexShardSnapshotStatus> shardsStatus = snapshotShardsService.currentSnapshotShards(snapshot);
+                final var shardsStatus = snapshotShardsService.currentSnapshotShards(snapshot);
                 if (shardsStatus == null) {
                     continue;
                 }
                 Map<ShardId, SnapshotIndexShardStatus> shardMapBuilder = new HashMap<>();
-                for (Map.Entry<ShardId, IndexShardSnapshotStatus> shardEntry : shardsStatus.entrySet()) {
+                for (final var shardEntry : shardsStatus.entrySet()) {
                     final ShardId shardId = shardEntry.getKey();
 
-                    final IndexShardSnapshotStatus.Copy lastSnapshotStatus = shardEntry.getValue().asCopy();
+                    final IndexShardSnapshotStatus.Copy lastSnapshotStatus = shardEntry.getValue();
                     final IndexShardSnapshotStatus.Stage stage = lastSnapshotStatus.getStage();
 
                     String shardNodeId = null;
@@ -125,12 +123,6 @@ public class TransportNodesSnapshotsStatus extends TransportNodesAction<
 
         private Snapshot[] snapshots;
 
-        public Request(StreamInput in) throws IOException {
-            super(in);
-            // This operation is never executed remotely
-            throw new UnsupportedOperationException("shouldn't be here");
-        }
-
         public Request(String[] nodesIds) {
             super(nodesIds);
         }
@@ -139,19 +131,9 @@ public class TransportNodesSnapshotsStatus extends TransportNodesAction<
             this.snapshots = snapshots;
             return this;
         }
-
-        @Override
-        public void writeTo(StreamOutput out) throws IOException {
-            // This operation is never executed remotely
-            throw new UnsupportedOperationException("shouldn't be here");
-        }
     }
 
     public static class NodesSnapshotStatus extends BaseNodesResponse<NodeSnapshotStatus> {
-
-        public NodesSnapshotStatus(StreamInput in) throws IOException {
-            super(in);
-        }
 
         public NodesSnapshotStatus(ClusterName clusterName, List<NodeSnapshotStatus> nodes, List<FailedNodeException> failures) {
             super(clusterName, nodes, failures);

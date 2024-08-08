@@ -107,17 +107,19 @@ public class PyTorchResultProcessor {
 
                 if (result.inferenceResult() != null) {
                     processInferenceResult(result);
-                }
-                ThreadSettings threadSettings = result.threadSettings();
-                if (threadSettings != null) {
-                    threadSettingsConsumer.accept(threadSettings);
+                } else if (result.threadSettings() != null) {
+                    threadSettingsConsumer.accept(result.threadSettings());
                     processThreadSettings(result);
-                }
-                if (result.ackResult() != null) {
+                } else if (result.ackResult() != null) {
                     processAcknowledgement(result);
-                }
-                if (result.errorResult() != null) {
+                } else if (result.errorResult() != null) {
                     processErrorResult(result);
+                } else {
+                    // will should only get here if the native process
+                    // has produced a partially valid result, one that
+                    // is accepted by the parser but does not have any
+                    // content
+                    handleUnknownResultType(result);
                 }
             }
         } catch (Exception e) {
@@ -139,6 +141,9 @@ public class PyTorchResultProcessor {
     }
 
     private void notifyAndClearPendingResults(ErrorResult errorResult) {
+        if (pendingResults.size() > 0) {
+            logger.warn(format("[%s] clearing [%d] requests pending results", modelId, pendingResults.size()));
+        }
         pendingResults.forEach(
             (id, pendingResult) -> pendingResult.listener.onResponse(new PyTorchResult(id, null, null, null, null, null, errorResult))
         );
@@ -155,11 +160,11 @@ public class PyTorchResultProcessor {
         }
 
         logger.debug(() -> format("[%s] Parsed inference result with id [%s]", modelId, result.requestId()));
-        updateStats(timeMs, Boolean.TRUE.equals(result.isCacheHit()));
         PendingResult pendingResult = pendingResults.remove(result.requestId());
         if (pendingResult == null) {
             logger.debug(() -> format("[%s] no pending result for inference [%s]", modelId, result.requestId()));
         } else {
+            updateStats(timeMs, Boolean.TRUE.equals(result.isCacheHit()));
             pendingResult.listener.onResponse(result);
         }
     }
@@ -208,6 +213,26 @@ public class PyTorchResultProcessor {
         }
     }
 
+    void handleUnknownResultType(PyTorchResult result) {
+        if (result.requestId() != null) {
+            PendingResult pendingResult = pendingResults.remove(result.requestId());
+            if (pendingResult == null) {
+                logger.error(() -> format("[%s] no pending result listener for unknown result type [%s]", modelId, result));
+            } else {
+                String msg = format("[%s] pending result listener cannot handle unknown result type [%s]", modelId, result);
+                logger.error(msg);
+                var errorResult = new ErrorResult(msg);
+                pendingResult.listener.onResponse(new PyTorchResult(result.requestId(), null, null, null, null, null, errorResult));
+            }
+        } else {
+            // Cannot look up the listener without a request id
+            // all that can be done in this case is log a message.
+            // The result parser requires a request id so this
+            // code should not be hit.
+            logger.error(() -> format("[%s] cannot process unknown result type [%s]", modelId, result));
+        }
+    }
+
     public synchronized ResultStats getResultStats() {
         long currentMs = currentTimeMsSupplier.getAsLong();
         long currentPeriodStartTimeMs = startTime + Intervals.alignToFloor(currentMs - startTime, REPORTING_PERIOD_MS);
@@ -244,7 +269,7 @@ public class PyTorchResultProcessor {
         );
     }
 
-    private LongSummaryStatistics cloneSummaryStats(LongSummaryStatistics stats) {
+    private static LongSummaryStatistics cloneSummaryStats(LongSummaryStatistics stats) {
         return new LongSummaryStatistics(stats.getCount(), stats.getMin(), stats.getMax(), stats.getSum());
     }
 

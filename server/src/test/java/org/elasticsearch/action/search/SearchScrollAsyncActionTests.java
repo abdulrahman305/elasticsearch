@@ -8,6 +8,7 @@
 package org.elasticsearch.action.search;
 
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.support.ActionTestUtils;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodeUtils;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
@@ -61,7 +62,7 @@ public class SearchScrollAsyncActionTests extends ESTestCase {
             protected void executeInitialPhase(
                 Transport.Connection connection,
                 InternalScrollSearchRequest internalRequest,
-                SearchActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
+                ActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
             ) {
                 new Thread(() -> {
                     SearchAsyncActionTests.TestSearchPhaseResult testSearchPhaseResult = new SearchAsyncActionTests.TestSearchPhaseResult(
@@ -158,7 +159,7 @@ public class SearchScrollAsyncActionTests extends ESTestCase {
             protected void executeInitialPhase(
                 Transport.Connection connection,
                 InternalScrollSearchRequest internalRequest,
-                SearchActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
+                ActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
             ) {
                 new Thread(() -> {
                     SearchAsyncActionTests.TestSearchPhaseResult testSearchPhaseResult = new SearchAsyncActionTests.TestSearchPhaseResult(
@@ -231,7 +232,7 @@ public class SearchScrollAsyncActionTests extends ESTestCase {
             protected void executeInitialPhase(
                 Transport.Connection connection,
                 InternalScrollSearchRequest internalRequest,
-                SearchActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
+                ActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
             ) {
                 try {
                     assertNotEquals("node2 is not available", "node2", connection.getNode().getId());
@@ -316,7 +317,7 @@ public class SearchScrollAsyncActionTests extends ESTestCase {
             protected void executeInitialPhase(
                 Transport.Connection connection,
                 InternalScrollSearchRequest internalRequest,
-                SearchActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
+                ActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
             ) {
                 new Thread(() -> {
                     if (internalRequest.contextId().getId() == 17) {
@@ -419,7 +420,7 @@ public class SearchScrollAsyncActionTests extends ESTestCase {
             protected void executeInitialPhase(
                 Transport.Connection connection,
                 InternalScrollSearchRequest internalRequest,
-                SearchActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
+                ActionListener<SearchAsyncActionTests.TestSearchPhaseResult> searchActionListener
             ) {
                 new Thread(() -> searchActionListener.onFailure(new IllegalArgumentException("BOOM on shard"))).start();
             }
@@ -457,20 +458,10 @@ public class SearchScrollAsyncActionTests extends ESTestCase {
     private static ParsedScrollId getParsedScrollId(SearchContextIdForNode... idsForNodes) {
         List<SearchContextIdForNode> searchContextIdForNodes = Arrays.asList(idsForNodes);
         Collections.shuffle(searchContextIdForNodes, random());
-        return new ParsedScrollId("", "test", searchContextIdForNodes.toArray(new SearchContextIdForNode[0]));
+        return new ParsedScrollId("test", searchContextIdForNodes.toArray(new SearchContextIdForNode[0]));
     }
 
     private ActionListener<SearchResponse> dummyListener() {
-        return new ActionListener<SearchResponse>() {
-            @Override
-            public void onResponse(SearchResponse response) {
-                fail("dummy");
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                throw new AssertionError(e);
-            }
-        };
+        return ActionTestUtils.assertNoFailureListener(response -> fail("dummy"));
     }
 }

@@ -9,6 +9,7 @@ package org.elasticsearch.ingest;
 
 import org.elasticsearch.action.admin.cluster.node.stats.NodeStats;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsRequest;
+import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsRequestParameters.Metric;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
 import org.elasticsearch.action.admin.cluster.stats.ClusterStatsResponse;
 import org.elasticsearch.action.bulk.BulkRequest;
@@ -43,11 +44,6 @@ public class IngestStatsNamesAndTypesIT extends ESIntegTestCase {
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
         return List.of(CustomIngestTestPlugin.class, CustomScriptPlugin.class);
-    }
-
-    @Override
-    protected boolean ignoreExternalCluster() {
-        return true;
     }
 
     @SuppressWarnings("unchecked")
@@ -105,7 +101,7 @@ public class IngestStatsNamesAndTypesIT extends ESIntegTestCase {
         client().bulk(bulkRequest).actionGet();
 
         {
-            NodesStatsResponse nodesStatsResponse = clusterAdmin().nodesStats(new NodesStatsRequest().addMetric("ingest")).actionGet();
+            NodesStatsResponse nodesStatsResponse = clusterAdmin().nodesStats(new NodesStatsRequest().addMetric(Metric.INGEST)).actionGet();
             assertThat(nodesStatsResponse.getNodes().size(), equalTo(1));
 
             NodeStats stats = nodesStatsResponse.getNodes().get(0);
@@ -148,7 +144,10 @@ public class IngestStatsNamesAndTypesIT extends ESIntegTestCase {
             builder.startObject();
             response.toXContent(builder, new ToXContent.MapParams(Map.of()));
             builder.endObject();
-            Map<String, Object> stats = createParser(JsonXContent.jsonXContent, Strings.toString(builder)).map();
+            Map<String, Object> stats;
+            try (var parser = createParser(JsonXContent.jsonXContent, Strings.toString(builder))) {
+                stats = parser.map();
+            }
 
             int setProcessorCount = path(stats, "nodes.ingest.processor_stats.set.count");
             assertThat(setProcessorCount, equalTo(3));

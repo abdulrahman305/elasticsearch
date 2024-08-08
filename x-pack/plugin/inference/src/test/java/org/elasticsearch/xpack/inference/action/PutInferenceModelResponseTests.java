@@ -10,20 +10,23 @@ package org.elasticsearch.xpack.inference.action;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.test.AbstractWireSerializingTestCase;
+import org.elasticsearch.xpack.core.inference.action.PutInferenceModelAction;
 import org.elasticsearch.xpack.inference.InferenceNamedWriteablesProvider;
-import org.elasticsearch.xpack.inference.ModelTests;
+import org.elasticsearch.xpack.inference.ModelConfigurationsTests;
 
 public class PutInferenceModelResponseTests extends AbstractWireSerializingTestCase<PutInferenceModelAction.Response> {
 
     @Override
     protected PutInferenceModelAction.Response createTestInstance() {
-        return new PutInferenceModelAction.Response(ModelTests.createRandomInstance());
+        return new PutInferenceModelAction.Response(ModelConfigurationsTests.createRandomInstance());
     }
 
     @Override
     protected PutInferenceModelAction.Response mutateInstance(PutInferenceModelAction.Response instance) {
-        var mutatedModel = ModelTests.mutateTestInstance(instance.getModel());
-        return new PutInferenceModelAction.Response(mutatedModel);
+        return randomValueOtherThan(instance, () -> {
+            var mutatedModel = ModelConfigurationsTests.mutateTestInstance(instance.getModel());
+            return new PutInferenceModelAction.Response(mutatedModel);
+        });
     }
 
     @Override

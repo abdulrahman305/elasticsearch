@@ -83,7 +83,7 @@ public class ThreadedActionListenerTests extends ESTestCase {
                                         e = elasticsearchException;
                                         assertNull(e.getCause());
                                     } else {
-                                        throw new AssertionError("unexpected", e);
+                                        fail(e);
                                     }
                                 }
 
@@ -91,7 +91,7 @@ public class ThreadedActionListenerTests extends ESTestCase {
                                     assertEquals("simulated", e.getMessage());
                                     assertEquals(0, e.getSuppressed().length);
                                 } else {
-                                    throw new AssertionError("unexpected", e);
+                                    fail(e);
                                 }
 
                             }
@@ -131,16 +131,16 @@ public class ThreadedActionListenerTests extends ESTestCase {
 
         assertEquals(
             "ThreadedActionListener[DeterministicTaskQueue/forkingExecutor/NoopActionListener]/onResponse",
-            PlainActionFuture.get(future -> new ThreadedActionListener<Void>(deterministicTaskQueue.getThreadPool(s -> {
-                future.onResponse(s.toString());
+            safeAwait(listener -> new ThreadedActionListener<Void>(deterministicTaskQueue.getThreadPool(s -> {
+                listener.onResponse(s.toString());
                 return s;
             }).generic(), randomBoolean(), ActionListener.noop()).onResponse(null))
         );
 
         assertEquals(
             "ThreadedActionListener[DeterministicTaskQueue/forkingExecutor/NoopActionListener]/onFailure",
-            PlainActionFuture.get(future -> new ThreadedActionListener<Void>(deterministicTaskQueue.getThreadPool(s -> {
-                future.onResponse(s.toString());
+            safeAwait(listener -> new ThreadedActionListener<Void>(deterministicTaskQueue.getThreadPool(s -> {
+                listener.onResponse(s.toString());
                 return s;
             }).generic(), randomBoolean(), ActionListener.noop()).onFailure(new ElasticsearchException("test")))
         );

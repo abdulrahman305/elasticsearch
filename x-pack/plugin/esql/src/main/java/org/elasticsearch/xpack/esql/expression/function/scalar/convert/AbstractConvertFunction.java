@@ -7,48 +7,68 @@
 
 package org.elasticsearch.xpack.esql.expression.function.scalar.convert;
 
+import joptsimple.internal.Strings;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.data.Vector;
+import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.compute.operator.EvalOperator;
 import org.elasticsearch.compute.operator.EvalOperator.ExpressionEvaluator;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.xpack.esql.EsqlIllegalArgumentException;
-import org.elasticsearch.xpack.esql.evaluator.mapper.EvaluatorMapper;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.tree.Source;
+import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.function.Warnings;
 import org.elasticsearch.xpack.esql.expression.function.scalar.UnaryScalarFunction;
-import org.elasticsearch.xpack.ql.expression.Expression;
-import org.elasticsearch.xpack.ql.tree.Source;
-import org.elasticsearch.xpack.ql.type.DataType;
+import org.elasticsearch.xpack.esql.io.stream.PlanStreamInput;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.BiFunction;
+import java.util.Set;
 import java.util.function.Function;
 
-import static org.elasticsearch.xpack.ql.expression.TypeResolutions.isType;
+import static org.elasticsearch.xpack.esql.core.expression.TypeResolutions.isType;
 
 /**
  * Base class for functions that converts a field into a function-specific type.
+ * <p>
+ *     We have a guide for writing these in the javadoc for
+ *     {@link org.elasticsearch.xpack.esql.expression.function.scalar}.
+ * </p>
  */
-public abstract class AbstractConvertFunction extends UnaryScalarFunction implements EvaluatorMapper {
+public abstract class AbstractConvertFunction extends UnaryScalarFunction {
+
+    // the numeric types convert functions need to handle; the other numeric types are converted upstream to one of these
+    private static final List<DataType> NUMERIC_TYPES = List.of(DataType.INTEGER, DataType.LONG, DataType.UNSIGNED_LONG, DataType.DOUBLE);
+    public static final List<DataType> STRING_TYPES = DataType.types().stream().filter(DataType::isString).toList();
 
     protected AbstractConvertFunction(Source source, Expression field) {
         super(source, field);
     }
 
+    protected AbstractConvertFunction(StreamInput in) throws IOException {
+        this(Source.readFrom((PlanStreamInput) in), in.readNamedWriteable(Expression.class));
+    }
+
     /**
      * Build the evaluator given the evaluator a multivalued field.
      */
-    protected ExpressionEvaluator.Factory evaluator(ExpressionEvaluator.Factory fieldEval) {
+    protected final ExpressionEvaluator.Factory evaluator(ExpressionEvaluator.Factory fieldEval) {
         DataType sourceType = field().dataType();
-        var evaluator = evaluators().get(sourceType);
-        if (evaluator == null) {
+        var factory = factories().get(sourceType);
+        if (factory == null) {
             throw EsqlIllegalArgumentException.illegalDataType(sourceType);
         }
-        return dvrCtx -> evaluator.apply(fieldEval.get(dvrCtx), source());
+        return factory.build(fieldEval, source());
     }
 
     @Override
@@ -56,21 +76,52 @@ public abstract class AbstractConvertFunction extends UnaryScalarFunction implem
         if (childrenResolved() == false) {
             return new TypeResolution("Unresolved children");
         }
-        return isType(
-            field(),
-            evaluators()::containsKey,
-            sourceText(),
-            null,
-            evaluators().keySet().stream().map(dt -> dt.name().toLowerCase(Locale.ROOT)).sorted().toArray(String[]::new)
-        );
+        return isType(field(), factories()::containsKey, sourceText(), null, supportedTypesNames(supportedTypes()));
     }
 
-    protected abstract Map<DataType, BiFunction<EvalOperator.ExpressionEvaluator, Source, EvalOperator.ExpressionEvaluator>> evaluators();
-
-    @Override
-    public final Object fold() {
-        return EvaluatorMapper.super.fold();
+    public Set<DataType> supportedTypes() {
+        return factories().keySet();
     }
+
+    public static String supportedTypesNames(Set<DataType> types) {
+        List<String> supportedTypesNames = new ArrayList<>(types.size());
+        HashSet<DataType> supportTypes = new HashSet<>(types);
+        if (supportTypes.containsAll(NUMERIC_TYPES)) {
+            supportedTypesNames.add("numeric");
+            NUMERIC_TYPES.forEach(supportTypes::remove);
+        }
+
+        if (types.containsAll(STRING_TYPES)) {
+            supportedTypesNames.add("string");
+            STRING_TYPES.forEach(supportTypes::remove);
+        }
+
+        supportTypes.forEach(t -> supportedTypesNames.add(t.nameUpper().toLowerCase(Locale.ROOT)));
+        supportedTypesNames.sort(String::compareTo);
+        return Strings.join(supportedTypesNames, " or ");
+    }
+
+    @FunctionalInterface
+    interface BuildFactory {
+        ExpressionEvaluator.Factory build(ExpressionEvaluator.Factory field, Source source);
+    }
+
+    /**
+     * A map from input type to {@link ExpressionEvaluator} ctor. Usually implemented like:
+     * <pre>{@code
+     *     private static final Map<DataType, BuildFactory> EVALUATORS = Map.ofEntries(
+     *         Map.entry(BOOLEAN, (field, source) -> field),
+     *         Map.entry(KEYWORD, ToBooleanFromStringEvaluator.Factory::new),
+     *         ...
+     *     );
+     *
+     *     @Override
+     *     protected Map<DataType, BuildFactory> factories() {
+     *         return EVALUATORS;
+     *     }
+     * }</pre>
+     */
+    protected abstract Map<DataType, BuildFactory> factories();
 
     @Override
     public ExpressionEvaluator.Factory toEvaluator(Function<Expression, ExpressionEvaluator.Factory> toEvaluator) {
@@ -81,10 +132,12 @@ public abstract class AbstractConvertFunction extends UnaryScalarFunction implem
 
         private static final Log logger = LogFactory.getLog(AbstractEvaluator.class);
 
+        protected final DriverContext driverContext;
         private final EvalOperator.ExpressionEvaluator fieldEvaluator;
         private final Warnings warnings;
 
-        protected AbstractEvaluator(EvalOperator.ExpressionEvaluator field, Source source) {
+        protected AbstractEvaluator(DriverContext driverContext, EvalOperator.ExpressionEvaluator field, Source source) {
+            this.driverContext = driverContext;
             this.fieldEvaluator = field;
             this.warnings = new Warnings(source);
         }
@@ -93,21 +146,22 @@ public abstract class AbstractConvertFunction extends UnaryScalarFunction implem
 
         /**
          * Called when evaluating a {@link Block} that contains null values.
+         * @return the returned Block has its own reference and the caller is responsible for releasing it.
          */
         protected abstract Block evalBlock(Block b);
 
         /**
          * Called when evaluating a {@link Block} that does not contain null values.
+         * @return the returned Block has its own reference and the caller is responsible for releasing it.
          */
         protected abstract Block evalVector(Vector v);
 
-        public Block eval(Page page) {
-            Block block = fieldEvaluator.eval(page);
-            if (block.areAllValuesNull()) {
-                return Block.constantNullBlock(page.getPositionCount());
+        @Override
+        public final Block eval(Page page) {
+            try (Block block = fieldEvaluator.eval(page)) {
+                Vector vector = block.asVector();
+                return vector == null ? evalBlock(block) : evalVector(vector);
             }
-            Vector vector = block.asVector();
-            return vector == null ? evalBlock(block) : evalVector(vector);
         }
 
         protected final void registerException(Exception exception) {

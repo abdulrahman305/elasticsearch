@@ -7,6 +7,8 @@
  */
 package org.elasticsearch.search.aggregations.bucket.terms;
 
+import com.carrotsearch.hppc.BitMixer;
+
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -19,13 +21,11 @@ import org.apache.lucene.util.automaton.Automaton;
 import org.apache.lucene.util.automaton.ByteRunAutomaton;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 import org.apache.lucene.util.automaton.Operations;
-import org.apache.lucene.util.hppc.BitMixer;
+import org.apache.lucene.util.automaton.RegExp;
 import org.elasticsearch.ElasticsearchParseException;
-import org.elasticsearch.TransportVersions;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
-import org.elasticsearch.common.lucene.RegExp;
 import org.elasticsearch.common.util.set.Sets;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.search.DocValueFormat;
@@ -170,7 +170,7 @@ public class IncludeExclude implements Writeable, ToXContentFragment {
         private Set<Long> valids;
         private Set<Long> invalids;
 
-        private Long spare = new Long(0);
+        private final Long spare = new Long(0);
 
         private SetBackedLongFilter(int numValids, int numInvalids) {
             if (numValids > 0) {
@@ -387,13 +387,6 @@ public class IncludeExclude implements Writeable, ToXContentFragment {
             include = includeString == null ? null : new RegExp(includeString);
             String excludeString = in.readOptionalString();
             exclude = excludeString == null ? null : new RegExp(excludeString);
-            if (in.getTransportVersion().before(TransportVersions.V_7_11_0)) {
-                incZeroBasedPartition = 0;
-                incNumPartitions = 0;
-                includeValues = null;
-                excludeValues = null;
-                return;
-            }
         } else {
             include = null;
             exclude = null;
@@ -427,9 +420,6 @@ public class IncludeExclude implements Writeable, ToXContentFragment {
         if (regexBased) {
             out.writeOptionalString(include == null ? null : include.getOriginalString());
             out.writeOptionalString(exclude == null ? null : exclude.getOriginalString());
-            if (out.getTransportVersion().before(TransportVersions.V_7_11_0)) {
-                return;
-            }
         }
         boolean hasIncludes = includeValues != null;
         out.writeBoolean(hasIncludes);

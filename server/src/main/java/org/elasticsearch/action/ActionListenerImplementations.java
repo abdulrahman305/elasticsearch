@@ -9,6 +9,7 @@
 package org.elasticsearch.action;
 
 import org.elasticsearch.common.CheckedBiConsumer;
+import org.elasticsearch.core.CheckedConsumer;
 import org.elasticsearch.core.CheckedFunction;
 import org.elasticsearch.core.CheckedRunnable;
 import org.elasticsearch.core.Releasable;
@@ -197,6 +198,11 @@ class ActionListenerImplementations {
         }
     }
 
+    /**
+     * Replaces the onResponse handling of a given ActionListener with a lambda that receives both the original listener and a response.
+     * This is useful when a listener is needed to do some additional work with a response before passing a response on to the original
+     * listener.
+     */
     static final class DelegatingFailureActionListener<T, R> extends DelegatingActionListener<T, R> {
 
         private final BiConsumer<ActionListener<R>, T> bc;
@@ -221,6 +227,10 @@ class ActionListenerImplementations {
         }
     }
 
+    /**
+     * The same as {@link DelegatingFailureActionListener} with the addition of exception handling in {@link #onResponse(Object)} to forward
+     * any exceptions to {@link #onFailure(Exception)}.
+     */
     static final class ResponseWrappingActionListener<T, R> extends DelegatingActionListener<T, R> {
 
         private final CheckedBiConsumer<ActionListener<R>, T, ? extends Exception> bc;
@@ -242,6 +252,33 @@ class ActionListenerImplementations {
         @Override
         public String toString() {
             return super.toString() + "/" + bc;
+        }
+    }
+
+    /**
+     * The same as {@link ResponseWrappingActionListener} except that the response is dropped
+     */
+    static final class ResponseDroppingActionListener<T, R> extends DelegatingActionListener<T, R> {
+
+        private final CheckedConsumer<ActionListener<R>, ? extends Exception> consumer;
+
+        ResponseDroppingActionListener(ActionListener<R> delegate, CheckedConsumer<ActionListener<R>, ? extends Exception> consumer) {
+            super(delegate);
+            this.consumer = consumer;
+        }
+
+        @Override
+        public void onResponse(T ignored) {
+            try {
+                consumer.accept(delegate);
+            } catch (Exception e) {
+                onFailure(e);
+            }
+        }
+
+        @Override
+        public String toString() {
+            return super.toString() + "/" + consumer;
         }
     }
 

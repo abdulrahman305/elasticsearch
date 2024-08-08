@@ -14,7 +14,6 @@ import org.elasticsearch.common.Explicit;
 import org.elasticsearch.common.geo.GeometryFormatterFactory;
 import org.elasticsearch.common.geo.ShapeRelation;
 import org.elasticsearch.common.logging.DeprecationCategory;
-import org.elasticsearch.common.logging.DeprecationLogger;
 import org.elasticsearch.core.CheckedFunction;
 import org.elasticsearch.geometry.Geometry;
 import org.elasticsearch.geometry.Point;
@@ -23,7 +22,6 @@ import org.elasticsearch.index.fielddata.IndexFieldData;
 import org.elasticsearch.index.mapper.AbstractPointGeometryFieldMapper;
 import org.elasticsearch.index.mapper.DocumentParserContext;
 import org.elasticsearch.index.mapper.FieldMapper;
-import org.elasticsearch.index.mapper.GeoShapeFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.MapperBuilderContext;
 import org.elasticsearch.index.query.SearchExecutionContext;
@@ -48,8 +46,6 @@ import java.util.function.Function;
  */
 public class PointFieldMapper extends AbstractPointGeometryFieldMapper<CartesianPoint> {
     public static final String CONTENT_TYPE = "point";
-
-    private static final DeprecationLogger DEPRECATION_LOGGER = DeprecationLogger.getLogger(GeoShapeFieldMapper.class);
 
     private static Builder builder(FieldMapper in) {
         return ((PointFieldMapper) in).builder;
@@ -105,21 +101,22 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
                 );
             }
             CartesianPointParser parser = new CartesianPointParser(
-                name,
+                leafName(),
                 p -> CartesianPoint.parsePoint(p, ignoreZValue.get().value()),
                 nullValue.get(),
                 ignoreZValue.get().value(),
                 ignoreMalformed.get().value()
             );
             PointFieldType ft = new PointFieldType(
-                context.buildFullName(name),
+                context.buildFullName(leafName()),
                 indexed.get(),
                 stored.get(),
                 hasDocValues.get(),
                 parser,
+                nullValue.get(),
                 meta.get()
             );
-            return new PointFieldMapper(name, ft, multiFieldsBuilder.build(this, context), copyTo, parser, this);
+            return new PointFieldMapper(leafName(), ft, multiFieldsBuilder.build(this, context), copyTo, parser, this);
         }
 
     }
@@ -150,7 +147,7 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
     }
 
     @Override
-    protected void index(DocumentParserContext context, CartesianPoint point) throws IOException {
+    protected void index(DocumentParserContext context, CartesianPoint point) {
         if (fieldType().isIndexed()) {
             context.doc().add(new XYPointField(fieldType().name(), (float) point.getX(), (float) point.getY()));
         }
@@ -176,10 +173,10 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
 
     @Override
     public FieldMapper.Builder getMergeBuilder() {
-        return new Builder(simpleName(), builder.ignoreMalformed.getDefaultValue().value()).init(this);
+        return new Builder(leafName(), builder.ignoreMalformed.getDefaultValue().value()).init(this);
     }
 
-    public static class PointFieldType extends AbstractGeometryFieldType<CartesianPoint> implements ShapeQueryable {
+    public static class PointFieldType extends AbstractPointFieldType<CartesianPoint> implements ShapeQueryable {
 
         private final ShapeQueryPointProcessor queryProcessor;
 
@@ -189,15 +186,16 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
             boolean stored,
             boolean hasDocValues,
             CartesianPointParser parser,
+            CartesianPoint nullValue,
             Map<String, String> meta
         ) {
-            super(name, indexed, stored, hasDocValues, parser, meta);
+            super(name, indexed, stored, hasDocValues, parser, nullValue, meta);
             this.queryProcessor = new ShapeQueryPointProcessor();
         }
 
         // only used in test
         public PointFieldType(String name) {
-            this(name, true, false, true, null, Collections.emptyMap());
+            this(name, true, false, true, null, null, Collections.emptyMap());
         }
 
         @Override

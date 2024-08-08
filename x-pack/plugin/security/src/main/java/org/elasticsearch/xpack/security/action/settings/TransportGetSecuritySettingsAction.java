@@ -19,6 +19,7 @@ import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -46,15 +47,15 @@ public class TransportGetSecuritySettingsAction extends TransportMasterNodeActio
         IndexNameExpressionResolver indexNameExpressionResolver
     ) {
         super(
-            GetSecuritySettingsAction.NAME,
+            GetSecuritySettingsAction.INSTANCE.name(),
             transportService,
             clusterService,
             threadPool,
             actionFilters,
-            GetSecuritySettingsAction.Request::new,
+            GetSecuritySettingsAction.Request::readFrom,
             indexNameExpressionResolver,
             GetSecuritySettingsAction.Response::new,
-            ThreadPool.Names.SAME
+            EsExecutors.DIRECT_EXECUTOR_SERVICE
         );
     }
 

@@ -70,7 +70,7 @@ public class ByteKnnDenseVector implements DenseVector {
     }
 
     @SuppressForbidden(reason = "used only for bytes so it cannot overflow")
-    private int abs(int value) {
+    private static int abs(int value) {
         return Math.abs(value);
     }
 
@@ -99,6 +99,20 @@ public class ByteKnnDenseVector implements DenseVector {
             i++;
         }
         return result;
+    }
+
+    @Override
+    public int hamming(byte[] queryVector) {
+        return ESVectorUtil.xorBitCount(queryVector, docVector);
+    }
+
+    @Override
+    public int hamming(List<Number> queryVector) {
+        int distance = 0;
+        for (int i = 0; i < queryVector.size(); i++) {
+            distance += Integer.bitCount((queryVector.get(i).intValue() ^ docVector[i]) & 0xFF);
+        }
+        return distance;
     }
 
     @Override

@@ -7,7 +7,6 @@
  */
 package org.elasticsearch.action.datastreams;
 
-import org.elasticsearch.TransportVersions;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.IndicesRequest;
@@ -15,9 +14,11 @@ import org.elasticsearch.action.ValidateActions;
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.action.support.master.AcknowledgedRequest;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
+import org.elasticsearch.action.support.master.MasterNodeRequest;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.core.TimeValue;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -28,7 +29,7 @@ public class CreateDataStreamAction extends ActionType<AcknowledgedResponse> {
     public static final String NAME = "indices:admin/data_stream/create";
 
     private CreateDataStreamAction() {
-        super(NAME, AcknowledgedResponse::readFrom);
+        super(NAME);
     }
 
     public static class Request extends AcknowledgedRequest<Request> implements IndicesRequest {
@@ -36,14 +37,21 @@ public class CreateDataStreamAction extends ActionType<AcknowledgedResponse> {
         private final String name;
         private final long startTime;
 
-        public Request(String name) {
+        public Request(TimeValue masterNodeTimeout, TimeValue ackTimeout, String name) {
+            super(masterNodeTimeout, ackTimeout);
             this.name = name;
             this.startTime = System.currentTimeMillis();
         }
 
-        public Request(String name, long startTime) {
+        public Request(TimeValue masterNodeTimeout, TimeValue ackTimeout, String name, long startTime) {
+            super(masterNodeTimeout, ackTimeout);
             this.name = name;
             this.startTime = startTime;
+        }
+
+        @Deprecated(forRemoval = true) // temporary compatibility shim
+        public Request(String name) {
+            this(MasterNodeRequest.TRAPPY_IMPLICIT_DEFAULT_MASTER_NODE_TIMEOUT, AcknowledgedRequest.DEFAULT_ACK_TIMEOUT, name);
         }
 
         public String getName() {
@@ -66,20 +74,14 @@ public class CreateDataStreamAction extends ActionType<AcknowledgedResponse> {
         public Request(StreamInput in) throws IOException {
             super(in);
             this.name = in.readString();
-            if (in.getTransportVersion().onOrAfter(TransportVersions.V_7_16_0)) {
-                this.startTime = in.readVLong();
-            } else {
-                this.startTime = System.currentTimeMillis();
-            }
+            this.startTime = in.readVLong();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
             super.writeTo(out);
             out.writeString(name);
-            if (out.getTransportVersion().onOrAfter(TransportVersions.V_7_16_0)) {
-                out.writeVLong(startTime);
-            }
+            out.writeVLong(startTime);
         }
 
         @Override

@@ -15,11 +15,11 @@ import org.apache.lucene.index.IndexableField;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.index.IndexVersion;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.DocumentParsingException;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.MapperTestCase;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.SourceToParse;
@@ -49,12 +49,6 @@ public class SparseVectorFieldMapperTests extends MapperTestCase {
     @Override
     protected Object getSampleObjectForDocument() {
         return getSampleValueForDocument();
-    }
-
-    @Override
-    protected void assertExistsQuery(MapperService mapperService) {
-        IllegalArgumentException iae = expectThrows(IllegalArgumentException.class, () -> super.assertExistsQuery(mapperService));
-        assertEquals("[sparse_vector] fields do not support [exists] queries", iae.getMessage());
     }
 
     @Override
@@ -125,7 +119,8 @@ public class SparseVectorFieldMapperTests extends MapperTestCase {
         assertThat(ex.getCause().getMessage(), containsString("politi.cs"));
     }
 
-    public void testRejectMultiValuedFields() throws MapperParsingException, IOException {
+    public void testHandlesMultiValuedFields() throws MapperParsingException, IOException {
+        // setup a mapping that includes a sparse vector property
         DocumentMapper mapper = createDocumentMapper(mapping(b -> {
             b.startObject("field").field("type", "sparse_vector").endObject();
             b.startObject("foo").startObject("properties");
@@ -135,27 +130,39 @@ public class SparseVectorFieldMapperTests extends MapperTestCase {
             b.endObject().endObject();
         }));
 
+        // when providing a malformed list of values for a single field
         DocumentParsingException e = expectThrows(
             DocumentParsingException.class,
             () -> mapper.parse(source(b -> b.startObject("field").field("foo", Arrays.asList(10, 20)).endObject()))
         );
+
+        // then fail appropriately
         assertEquals(
             "[sparse_vector] fields take hashes that map a feature to a strictly positive float, but got unexpected token " + "START_ARRAY",
             e.getCause().getMessage()
         );
 
-        e = expectThrows(DocumentParsingException.class, () -> mapper.parse(source(b -> {
+        // when providing a two fields with the same key name
+        ParsedDocument doc1 = mapper.parse(source(b -> {
             b.startArray("foo");
             {
-                b.startObject().startObject("field").field("bar", 10).endObject().endObject();
+                b.startObject().startObject("field").field("coup", 1).endObject().endObject();
+                b.startObject().startObject("field").field("bar", 5).endObject().endObject();
                 b.startObject().startObject("field").field("bar", 20).endObject().endObject();
+                b.startObject().startObject("field").field("bar", 10).endObject().endObject();
+                b.startObject().startObject("field").field("soup", 2).endObject().endObject();
             }
             b.endArray();
-        })));
-        assertEquals(
-            "[sparse_vector] fields do not support indexing multiple values for the same feature [foo.field.bar] in " + "the same document",
-            e.getCause().getMessage()
-        );
+        }));
+
+        // then validate that the generate document stored both values appropriately and we have only the max value stored
+        FeatureField barField = ((FeatureField) doc1.rootDoc().getByKey("foo.field.bar"));
+        assertEquals(20, barField.getFeatureValue(), 1);
+
+        FeatureField storedBarField = ((FeatureField) doc1.rootDoc().getFields("foo.field").get(1));
+        assertEquals(20, storedBarField.getFeatureValue(), 1);
+
+        assertEquals(3, doc1.rootDoc().getFields().stream().filter((f) -> f instanceof FeatureField).count());
     }
 
     public void testCannotBeUsedInMultiFields() {
@@ -247,7 +254,7 @@ public class SparseVectorFieldMapperTests extends MapperTestCase {
         IndexVersion version = IndexVersionUtils.randomVersionBetween(
             random(),
             PREVIOUS_SPARSE_VECTOR_INDEX_VERSION,
-            IndexVersion.V_8_500_000
+            IndexVersions.FIRST_DETACHED_INDEX_VERSION
         );
         Exception e = expectThrows(MapperParsingException.class, () -> createMapperService(version, fieldMapping(b -> {
             b.field("type", "sparse_vector");

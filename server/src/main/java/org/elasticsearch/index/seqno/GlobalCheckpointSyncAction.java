@@ -39,7 +39,7 @@ public class GlobalCheckpointSyncAction extends TransportReplicationAction<
     ReplicationResponse> {
 
     public static String ACTION_NAME = "indices:admin/seq_no/global_checkpoint_sync";
-    public static ActionType<ReplicationResponse> TYPE = new ActionType<>(ACTION_NAME, ReplicationResponse::new);
+    public static ActionType<ReplicationResponse> TYPE = new ActionType<>(ACTION_NAME);
 
     @Inject
     public GlobalCheckpointSyncAction(
@@ -63,8 +63,9 @@ public class GlobalCheckpointSyncAction extends TransportReplicationAction<
             Request::new,
             Request::new,
             threadPool.executor(ThreadPool.Names.WRITE),
-            false,
-            true
+            SyncGlobalCheckpointAfterOperation.DoNotSync,
+            PrimaryActionExecution.Force,
+            ReplicaActionExecution.SubjectToCircuitBreaker
         );
     }
 

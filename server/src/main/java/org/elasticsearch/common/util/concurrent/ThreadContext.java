@@ -11,6 +11,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.action.support.ContextPreservingActionListener;
 import org.elasticsearch.client.internal.OriginSettingClient;
+import org.elasticsearch.common.ReferenceDocs;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
@@ -23,6 +24,7 @@ import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.http.HttpTransportSettings;
 import org.elasticsearch.tasks.Task;
+import org.elasticsearch.telemetry.tracing.TraceContext;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -69,7 +71,7 @@ import static org.elasticsearch.tasks.Task.HEADERS_TO_COPY;
  * </pre>
  *
  */
-public final class ThreadContext implements Writeable {
+public final class ThreadContext implements Writeable, TraceContext {
 
     public static final String PREFIX = "request.headers";
     public static final Setting<Settings> DEFAULT_HEADERS_SETTING = Setting.groupSetting(PREFIX + ".", Property.NodeScope);
@@ -797,6 +799,30 @@ public final class ThreadContext implements Writeable {
             return new ThreadContextStruct(requestHeaders, newResponseHeaders, transientHeaders, isSystemContext);
         }
 
+        private void logWarningHeaderThresholdExceeded(long threshold, Setting<?> thresholdSetting) {
+            // If available, log some selected headers to help identifying the source of the request.
+            // Note: Only Task.HEADERS_TO_COPY are guaranteed to be preserved at this point.
+            Map<String, String> selectedHeaders = new HashMap<>(requestHeaders);
+            selectedHeaders.keySet().retainAll(List.of(Task.X_OPAQUE_ID_HTTP_HEADER, Task.X_ELASTIC_PRODUCT_ORIGIN_HTTP_HEADER));
+
+            boolean sizeExceeded = HttpTransportSettings.SETTING_HTTP_MAX_WARNING_HEADER_SIZE.equals(thresholdSetting);
+
+            StringBuilder message = new StringBuilder().append("Dropping a warning header");
+            if (selectedHeaders.isEmpty() == false) {
+                message.append(" for request [").append(selectedHeaders).append("]");
+            }
+            message.append(", as their total").append(sizeExceeded ? " size" : " count");
+            message.append(" reached the maximum allowed of [").append(threshold).append("]").append(sizeExceeded ? " bytes" : "");
+            message.append(" set in [").append(thresholdSetting.getKey()).append("]!");
+
+            if (selectedHeaders.containsKey(Task.X_OPAQUE_ID_HTTP_HEADER) == false) {
+                message.append(" Add X-Opaque-Id headers to identify the source of this warning");
+                message.append(", see ").append(ReferenceDocs.X_OPAQUE_ID).append(" for more information.");
+            }
+
+            logger.warn(message);
+        }
+
         private ThreadContextStruct putResponse(
             final String key,
             final String value,
@@ -809,24 +835,12 @@ public final class ThreadContext implements Writeable {
             // check if we can add another warning header - if max size within limits
             if (key.equals("Warning") && (maxWarningHeaderSize != -1)) { // if size is NOT unbounded, check its limits
                 if (warningHeadersSize > maxWarningHeaderSize) { // if max size has already been reached before
-                    logger.warn(
-                        "Dropping a warning header, as their total size reached the maximum allowed of ["
-                            + maxWarningHeaderSize
-                            + "] bytes set in ["
-                            + HttpTransportSettings.SETTING_HTTP_MAX_WARNING_HEADER_SIZE.getKey()
-                            + "]!"
-                    );
+                    logWarningHeaderThresholdExceeded(maxWarningHeaderSize, HttpTransportSettings.SETTING_HTTP_MAX_WARNING_HEADER_SIZE);
                     return this;
                 }
                 newWarningHeaderSize += "Warning".getBytes(StandardCharsets.UTF_8).length + value.getBytes(StandardCharsets.UTF_8).length;
                 if (newWarningHeaderSize > maxWarningHeaderSize) {
-                    logger.warn(
-                        "Dropping a warning header, as their total size reached the maximum allowed of ["
-                            + maxWarningHeaderSize
-                            + "] bytes set in ["
-                            + HttpTransportSettings.SETTING_HTTP_MAX_WARNING_HEADER_SIZE.getKey()
-                            + "]!"
-                    );
+                    logWarningHeaderThresholdExceeded(maxWarningHeaderSize, HttpTransportSettings.SETTING_HTTP_MAX_WARNING_HEADER_SIZE);
                     return new ThreadContextStruct(
                         requestHeaders,
                         responseHeaders,
@@ -856,13 +870,7 @@ public final class ThreadContext implements Writeable {
             if ((key.equals("Warning")) && (maxWarningHeaderCount != -1)) { // if count is NOT unbounded, check its limits
                 final int warningHeaderCount = newResponseHeaders.containsKey("Warning") ? newResponseHeaders.get("Warning").size() : 0;
                 if (warningHeaderCount > maxWarningHeaderCount) {
-                    logger.warn(
-                        "Dropping a warning header, as their total count reached the maximum allowed of ["
-                            + maxWarningHeaderCount
-                            + "] set in ["
-                            + HttpTransportSettings.SETTING_HTTP_MAX_WARNING_HEADER_COUNT.getKey()
-                            + "]!"
-                    );
+                    logWarningHeaderThresholdExceeded(maxWarningHeaderCount, HttpTransportSettings.SETTING_HTTP_MAX_WARNING_HEADER_COUNT);
                     return this;
                 }
             }

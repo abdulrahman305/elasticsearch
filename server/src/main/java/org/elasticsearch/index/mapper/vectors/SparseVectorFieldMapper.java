@@ -9,11 +9,14 @@
 package org.elasticsearch.index.mapper.vectors;
 
 import org.apache.lucene.document.FeatureField;
+import org.apache.lucene.index.IndexableField;
+import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.logging.DeprecationCategory;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.index.IndexVersion;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
 import org.elasticsearch.index.fielddata.FieldDataContext;
 import org.elasticsearch.index.fielddata.IndexFieldData;
@@ -42,10 +45,11 @@ public class SparseVectorFieldMapper extends FieldMapper {
 
     static final String ERROR_MESSAGE_7X = "[sparse_vector] field type in old 7.x indices is allowed to "
         + "contain [sparse_vector] fields, but they cannot be indexed or searched.";
-    static final String ERROR_MESSAGE_8X = "The [sparse_vector] field type is not supported from 8.0 to 8.10 versions.";
-    static final IndexVersion PREVIOUS_SPARSE_VECTOR_INDEX_VERSION = IndexVersion.V_8_0_0;
+    static final String ERROR_MESSAGE_8X = "The [sparse_vector] field type is not supported on indices created on versions 8.0 to 8.10.";
+    static final IndexVersion PREVIOUS_SPARSE_VECTOR_INDEX_VERSION = IndexVersions.V_8_0_0;
 
-    static final IndexVersion NEW_SPARSE_VECTOR_INDEX_VERSION = IndexVersion.V_8_500_001;
+    static final IndexVersion NEW_SPARSE_VECTOR_INDEX_VERSION = IndexVersions.NEW_SPARSE_VECTOR;
+    static final IndexVersion SPARSE_VECTOR_IN_FIELD_NAMES_INDEX_VERSION = IndexVersions.SPARSE_VECTOR_IN_FIELD_NAMES_SUPPORT;
 
     public static class Builder extends FieldMapper.Builder {
 
@@ -63,8 +67,8 @@ public class SparseVectorFieldMapper extends FieldMapper {
         @Override
         public SparseVectorFieldMapper build(MapperBuilderContext context) {
             return new SparseVectorFieldMapper(
-                name,
-                new SparseVectorFieldType(context.buildFullName(name), meta.getValue()),
+                leafName(),
+                new SparseVectorFieldType(context.buildFullName(leafName()), meta.getValue()),
                 multiFieldsBuilder.build(this, context),
                 copyTo
             );
@@ -93,11 +97,6 @@ public class SparseVectorFieldMapper extends FieldMapper {
         }
 
         @Override
-        public Query existsQuery(SearchExecutionContext context) {
-            throw new IllegalArgumentException("[sparse_vector] fields do not support [exists] queries");
-        }
-
-        @Override
         public IndexFieldData.Builder fielddataBuilder(FieldDataContext fieldDataContext) {
             throw new IllegalArgumentException("[sparse_vector] fields do not support sorting, scripting or aggregating");
         }
@@ -110,6 +109,18 @@ public class SparseVectorFieldMapper extends FieldMapper {
         @Override
         public Query termQuery(Object value, SearchExecutionContext context) {
             return FeatureField.newLinearQuery(name(), indexedValueForSearch(value), DEFAULT_BOOST);
+        }
+
+        @Override
+        public Query existsQuery(SearchExecutionContext context) {
+            if (context.getIndexSettings().getIndexVersionCreated().before(PREVIOUS_SPARSE_VECTOR_INDEX_VERSION)) {
+                deprecationLogger.warn(DeprecationCategory.MAPPINGS, "sparse_vector", ERROR_MESSAGE_7X);
+                return new MatchNoDocsQuery();
+            } else if (context.getIndexSettings().getIndexVersionCreated().before(SPARSE_VECTOR_IN_FIELD_NAMES_INDEX_VERSION)) {
+                // No support for exists queries prior to this version on 8.x
+                throw new IllegalArgumentException("[sparse_vector] fields do not support [exists] queries");
+            }
+            return super.existsQuery(context);
         }
 
         private static String indexedValueForSearch(Object value) {
@@ -131,7 +142,7 @@ public class SparseVectorFieldMapper extends FieldMapper {
 
     @Override
     public FieldMapper.Builder getMergeBuilder() {
-        return new Builder(simpleName()).init(this);
+        return new Builder(leafName()).init(this);
     }
 
     @Override
@@ -175,16 +186,17 @@ public class SparseVectorFieldMapper extends FieldMapper {
                 } else if (token == Token.VALUE_NULL) {
                     // ignore feature, this is consistent with numeric fields
                 } else if (token == Token.VALUE_NUMBER || token == Token.VALUE_STRING) {
-                    final String key = name() + "." + feature;
+                    final String key = fullPath() + "." + feature;
                     float value = context.parser().floatValue(true);
-                    if (context.doc().getByKey(key) != null) {
-                        throw new IllegalArgumentException(
-                            "[sparse_vector] fields do not support indexing multiple values for the same feature ["
-                                + key
-                                + "] in the same document"
-                        );
+
+                    // if we have an existing feature of the same name we'll select for the one with the max value
+                    // based on recommendations from this paper: https://arxiv.org/pdf/2305.18494.pdf
+                    IndexableField currentField = context.doc().getByKey(key);
+                    if (currentField == null) {
+                        context.doc().addWithKey(key, new FeatureField(fullPath(), feature, value));
+                    } else if (currentField instanceof FeatureField && ((FeatureField) currentField).getFeatureValue() < value) {
+                        ((FeatureField) currentField).setFeatureValue(value);
                     }
-                    context.doc().addWithKey(key, new FeatureField(name(), feature, value));
                 } else {
                     throw new IllegalArgumentException(
                         "[sparse_vector] fields take hashes that map a feature to a strictly positive "
@@ -192,6 +204,9 @@ public class SparseVectorFieldMapper extends FieldMapper {
                             + token
                     );
                 }
+            }
+            if (context.indexSettings().getIndexVersionCreated().onOrAfter(SPARSE_VECTOR_IN_FIELD_NAMES_INDEX_VERSION)) {
+                context.addToFieldNames(fieldType().name());
             }
         } finally {
             context.path().setWithinLeafObject(false);

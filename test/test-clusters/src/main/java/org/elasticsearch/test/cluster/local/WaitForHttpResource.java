@@ -56,7 +56,20 @@ public class WaitForHttpResource {
     private String password;
 
     public WaitForHttpResource(String protocol, String host, int numberOfNodes) throws MalformedURLException {
-        this(new URL(protocol + "://" + host + "/_cluster/health?wait_for_nodes=>=" + numberOfNodes + "&wait_for_status=yellow"));
+        this(
+            new URL(
+                protocol
+                    + "://"
+                    + host
+                    + "/_cluster/health"
+                    + "?wait_for_nodes=>="
+                    + numberOfNodes
+                    + "&wait_for_status=yellow"
+                    + "&wait_for_events=LANGUID"
+                    + "&wait_for_no_initializing_shards"
+                    + "&wait_for_no_relocating_shards"
+            )
+        );
     }
 
     public WaitForHttpResource(URL url) {
@@ -197,7 +210,7 @@ public class WaitForHttpResource {
         return store;
     }
 
-    private SSLContext createSslContext(KeyStore trustStore) throws GeneralSecurityException {
+    private static SSLContext createSslContext(KeyStore trustStore) throws GeneralSecurityException {
         checkForTrustEntry(trustStore);
         TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
         tmf.init(trustStore);
@@ -206,7 +219,7 @@ public class WaitForHttpResource {
         return sslContext;
     }
 
-    private void checkForTrustEntry(KeyStore trustStore) throws KeyStoreException {
+    private static void checkForTrustEntry(KeyStore trustStore) throws KeyStoreException {
         Enumeration<String> enumeration = trustStore.aliases();
         while (enumeration.hasMoreElements()) {
             if (trustStore.isCertificateEntry(enumeration.nextElement())) {

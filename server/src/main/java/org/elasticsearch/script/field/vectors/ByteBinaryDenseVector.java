@@ -21,7 +21,7 @@ public class ByteBinaryDenseVector implements DenseVector {
 
     private final BytesRef docVector;
     private final byte[] vectorValue;
-    private final int dims;
+    protected final int dims;
 
     private float[] floatDocVector;
     private boolean magnitudeDecoded;
@@ -73,7 +73,7 @@ public class ByteBinaryDenseVector implements DenseVector {
     }
 
     @SuppressForbidden(reason = "used only for bytes so it cannot overflow")
-    private int abs(int value) {
+    private static int abs(int value) {
         return Math.abs(value);
     }
 
@@ -98,6 +98,20 @@ public class ByteBinaryDenseVector implements DenseVector {
             result += abs(vectorValue[i] - queryVector.get(i).intValue());
         }
         return result;
+    }
+
+    @Override
+    public int hamming(byte[] queryVector) {
+        return ESVectorUtil.xorBitCount(queryVector, vectorValue);
+    }
+
+    @Override
+    public int hamming(List<Number> queryVector) {
+        int distance = 0;
+        for (int i = 0; i < queryVector.size(); i++) {
+            distance += Integer.bitCount((queryVector.get(i).intValue() ^ vectorValue[i]) & 0xFF);
+        }
+        return distance;
     }
 
     @Override

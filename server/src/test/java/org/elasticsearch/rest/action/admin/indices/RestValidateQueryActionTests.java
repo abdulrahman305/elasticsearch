@@ -16,8 +16,8 @@ import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.TransportAction;
 import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.common.bytes.BytesArray;
-import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.core.RestApiVersion;
 import org.elasticsearch.indices.breaker.NoneCircuitBreakerService;
@@ -27,7 +27,7 @@ import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.search.AbstractSearchTestCase;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.tasks.TaskManager;
-import org.elasticsearch.telemetry.tracing.Tracer;
+import org.elasticsearch.telemetry.TelemetryProvider;
 import org.elasticsearch.test.rest.FakeRestChannel;
 import org.elasticsearch.test.rest.FakeRestRequest;
 import org.elasticsearch.threadpool.TestThreadPool;
@@ -54,7 +54,13 @@ public class RestValidateQueryActionTests extends AbstractSearchTestCase {
     private NodeClient client = new NodeClient(Settings.EMPTY, threadPool);
 
     private UsageService usageService = new UsageService();
-    private RestController controller = new RestController(null, client, new NoneCircuitBreakerService(), usageService, Tracer.NOOP);
+    private RestController controller = new RestController(
+        null,
+        client,
+        new NoneCircuitBreakerService(),
+        usageService,
+        TelemetryProvider.NOOP
+    );
     private RestValidateQueryAction action = new RestValidateQueryAction();
 
     /**
@@ -69,7 +75,8 @@ public class RestValidateQueryActionTests extends AbstractSearchTestCase {
         final TransportAction<? extends ActionRequest, ? extends ActionResponse> transportAction = new TransportAction<>(
             ValidateQueryAction.NAME,
             new ActionFilters(Collections.emptySet()),
-            taskManager
+            taskManager,
+            EsExecutors.DIRECT_EXECUTOR_SERVICE
         ) {
             @Override
             protected void doExecute(Task task, ActionRequest request, ActionListener<ActionResponse> listener) {}
@@ -79,14 +86,7 @@ public class RestValidateQueryActionTests extends AbstractSearchTestCase {
             new HashMap<>();
         actions.put(ValidateQueryAction.INSTANCE, transportAction);
 
-        client.initialize(
-            actions,
-            taskManager,
-            () -> "local",
-            mock(Transport.Connection.class),
-            null,
-            new NamedWriteableRegistry(List.of())
-        );
+        client.initialize(actions, taskManager, () -> "local", mock(Transport.Connection.class), null);
         controller.registerHandler(action);
     }
 

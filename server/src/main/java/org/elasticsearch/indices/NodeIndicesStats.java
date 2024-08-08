@@ -38,6 +38,7 @@ import org.elasticsearch.index.shard.DenseVectorStats;
 import org.elasticsearch.index.shard.DocsStats;
 import org.elasticsearch.index.shard.IndexingStats;
 import org.elasticsearch.index.shard.ShardCountStats;
+import org.elasticsearch.index.shard.SparseVectorStats;
 import org.elasticsearch.index.store.StoreStats;
 import org.elasticsearch.index.translog.TranslogStats;
 import org.elasticsearch.index.warmer.WarmerStats;
@@ -59,6 +60,7 @@ import java.util.Objects;
 public class NodeIndicesStats implements Writeable, ChunkedToXContent {
 
     private static final TransportVersion VERSION_SUPPORTING_STATS_BY_INDEX = TransportVersions.V_8_5_0;
+    private static final Map<Index, List<IndexShardStats>> EMPTY_STATS_BY_SHARD = Map.of();
 
     private final CommonStats stats;
     private final Map<Index, List<IndexShardStats>> statsByShard;
@@ -86,8 +88,17 @@ public class NodeIndicesStats implements Writeable, ChunkedToXContent {
         }
     }
 
-    public NodeIndicesStats(CommonStats oldStats, Map<Index, CommonStats> statsByIndex, Map<Index, List<IndexShardStats>> statsByShard) {
-        this.statsByShard = Objects.requireNonNull(statsByShard);
+    public NodeIndicesStats(
+        CommonStats oldStats,
+        Map<Index, CommonStats> statsByIndex,
+        Map<Index, List<IndexShardStats>> statsByShard,
+        boolean includeShardsStats
+    ) {
+        if (includeShardsStats) {
+            this.statsByShard = Objects.requireNonNull(statsByShard);
+        } else {
+            this.statsByShard = EMPTY_STATS_BY_SHARD;
+        }
         this.statsByIndex = Objects.requireNonNull(statsByIndex);
 
         // make a total common stats from old ones and current ones
@@ -202,6 +213,11 @@ public class NodeIndicesStats implements Writeable, ChunkedToXContent {
     @Nullable
     public DenseVectorStats getDenseVectorStats() {
         return stats.getDenseVectorStats();
+    }
+
+    @Nullable
+    public SparseVectorStats getSparseVectorStats() {
+        return stats.getSparseVectorStats();
     }
 
     @Override

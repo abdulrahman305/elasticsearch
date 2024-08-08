@@ -16,10 +16,12 @@ import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.LatchedActionListener;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.common.util.set.Sets;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.tasks.TaskManager;
+import org.elasticsearch.telemetry.metric.MeterRegistry;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.junit.After;
@@ -50,7 +52,10 @@ public class TransportActionFilterChainTests extends ESTestCase {
     @Before
     public void init() throws Exception {
         counter = new AtomicInteger();
-        threadPool = new ThreadPool(Settings.builder().put(Node.NODE_NAME_SETTING.getKey(), "TransportActionFilterChainTests").build());
+        threadPool = new ThreadPool(
+            Settings.builder().put(Node.NODE_NAME_SETTING.getKey(), "TransportActionFilterChainTests").build(),
+            MeterRegistry.NOOP
+        );
     }
 
     @After
@@ -75,7 +80,8 @@ public class TransportActionFilterChainTests extends ESTestCase {
         TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(
             actionName,
             actionFilters,
-            new TaskManager(Settings.EMPTY, threadPool, Collections.emptySet())
+            new TaskManager(Settings.EMPTY, threadPool, Collections.emptySet()),
+            EsExecutors.DIRECT_EXECUTOR_SERVICE
         ) {
             @Override
             protected void doExecute(Task task, TestRequest request, ActionListener<TestResponse> listener) {
@@ -99,7 +105,7 @@ public class TransportActionFilterChainTests extends ESTestCase {
             }
         }
 
-        PlainActionFuture<TestResponse> future = PlainActionFuture.newFuture();
+        PlainActionFuture<TestResponse> future = new PlainActionFuture<>();
 
         ActionTestUtils.execute(transportAction, null, new TestRequest(), future);
         try {
@@ -135,8 +141,6 @@ public class TransportActionFilterChainTests extends ESTestCase {
     }
 
     public void testTooManyContinueProcessingRequest() throws InterruptedException {
-        final int additionalContinueCount = randomInt(10);
-
         RequestTestFilter testFilter = new RequestTestFilter(randomInt(), new RequestCallback() {
             @Override
             public <Request extends ActionRequest, Response extends ActionResponse> void execute(
@@ -146,36 +150,38 @@ public class TransportActionFilterChainTests extends ESTestCase {
                 ActionListener<Response> listener,
                 ActionFilterChain<Request, Response> actionFilterChain
             ) {
-                for (int i = 0; i <= additionalContinueCount; i++) {
-                    actionFilterChain.proceed(task, action, request, listener);
-                }
+                // expected proceed() call:
+                actionFilterChain.proceed(task, action, request, listener);
+
+                // extra, invalid, proceed() call:
+                actionFilterChain.proceed(task, action, request, listener);
             }
         });
 
         Set<ActionFilter> filters = new HashSet<>();
         filters.add(testFilter);
 
+        final CountDownLatch latch = new CountDownLatch(2);
         String actionName = randomAlphaOfLength(randomInt(30));
         ActionFilters actionFilters = new ActionFilters(filters);
         TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(
             actionName,
             actionFilters,
-            new TaskManager(Settings.EMPTY, threadPool, Collections.emptySet())
+            new TaskManager(Settings.EMPTY, threadPool, Collections.emptySet()),
+            EsExecutors.DIRECT_EXECUTOR_SERVICE
         ) {
             @Override
             protected void doExecute(Task task, TestRequest request, ActionListener<TestResponse> listener) {
-                listener.onResponse(new TestResponse());
+                latch.countDown();
             }
         };
 
-        final CountDownLatch latch = new CountDownLatch(additionalContinueCount + 1);
-        final AtomicInteger responses = new AtomicInteger();
         final List<Throwable> failures = new CopyOnWriteArrayList<>();
 
         ActionTestUtils.execute(transportAction, null, new TestRequest(), new LatchedActionListener<>(new ActionListener<>() {
             @Override
             public void onResponse(TestResponse testResponse) {
-                responses.incrementAndGet();
+                fail("should not complete listener");
             }
 
             @Override
@@ -191,8 +197,7 @@ public class TransportActionFilterChainTests extends ESTestCase {
         assertThat(testFilter.runs.get(), equalTo(1));
         assertThat(testFilter.lastActionName, equalTo(actionName));
 
-        assertThat(responses.get(), equalTo(1));
-        assertThat(failures.size(), equalTo(additionalContinueCount));
+        assertThat(failures.size(), equalTo(1));
         for (Throwable failure : failures) {
             assertThat(failure, instanceOf(IllegalStateException.class));
         }

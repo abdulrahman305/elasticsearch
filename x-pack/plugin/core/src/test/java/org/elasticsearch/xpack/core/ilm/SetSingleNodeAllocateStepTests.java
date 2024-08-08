@@ -9,7 +9,6 @@ package org.elasticsearch.xpack.core.ilm;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRequest;
-import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.internal.transport.NoNodeAvailableException;
 import org.elasticsearch.cluster.ClusterState;
@@ -31,6 +30,7 @@ import org.elasticsearch.common.util.Maps;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.index.IndexVersion;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.test.VersionUtils;
@@ -109,7 +109,12 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
             String nodeName = "node_" + i;
             int nodePort = 9300 + i;
             Settings nodeSettings = Settings.builder().put(validNodeSettings).put(Node.NODE_NAME_SETTING.getKey(), nodeName).build();
-            nodes.add(DiscoveryNode.createLocal(nodeSettings, new TransportAddress(TransportAddress.META_ADDRESS, nodePort), nodeId));
+            nodes.add(
+                DiscoveryNodeUtils.builder(nodeId)
+                    .applySettings(nodeSettings)
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .build()
+            );
             validNodeIds.add(nodeId);
         }
 
@@ -142,7 +147,12 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 .put(Node.NODE_NAME_SETTING.getKey(), nodeName)
                 .put(Node.NODE_ATTRIBUTES.getKey() + nodeAttr.getKey(), nodeAttr.getValue())
                 .build();
-            nodes.add(DiscoveryNode.createLocal(nodeSettings, new TransportAddress(TransportAddress.META_ADDRESS, nodePort), nodeId));
+            nodes.add(
+                DiscoveryNodeUtils.builder(nodeId)
+                    .applySettings(nodeSettings)
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .build()
+            );
             validNodeIds.add(nodeId);
         }
 
@@ -178,11 +188,10 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 nodeSettingsBuilder.put(invalidNodeSettings).put(Node.NODE_NAME_SETTING.getKey(), nodeName);
             }
             nodes.add(
-                DiscoveryNode.createLocal(
-                    nodeSettingsBuilder.build(),
-                    new TransportAddress(TransportAddress.META_ADDRESS, nodePort),
-                    nodeId
-                )
+                DiscoveryNodeUtils.builder(nodeId)
+                    .applySettings(nodeSettingsBuilder.build())
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .build()
             );
         }
 
@@ -203,7 +212,10 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
         int nodePort = 9300;
         Builder nodeSettingsBuilder = Settings.builder();
         nodes.add(
-            DiscoveryNode.createLocal(nodeSettingsBuilder.build(), new TransportAddress(TransportAddress.META_ADDRESS, nodePort), nodeId)
+            DiscoveryNodeUtils.builder(nodeId)
+                .applySettings(nodeSettingsBuilder.build())
+                .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                .build()
         );
 
         Settings clusterSettings = Settings.builder().put("cluster.routing.allocation.exclude._id", "node_id_0").build();
@@ -218,10 +230,7 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
 
         SetSingleNodeAllocateStep step = createRandomInstance();
 
-        expectThrows(
-            NoNodeAvailableException.class,
-            () -> PlainActionFuture.<Void, Exception>get(f -> step.performAction(indexMetadata, clusterState, null, f))
-        );
+        expectThrows(NoNodeAvailableException.class, () -> performActionAndWait(step, indexMetadata, clusterState, null));
 
         Mockito.verifyNoMoreInteractions(client);
     }
@@ -246,11 +255,10 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
             int nodePort = 9300 + i;
             Builder nodeSettingsBuilder = Settings.builder().put(invalidNodeSettings).put(Node.NODE_NAME_SETTING.getKey(), nodeName);
             nodes.add(
-                DiscoveryNode.createLocal(
-                    nodeSettingsBuilder.build(),
-                    new TransportAddress(TransportAddress.META_ADDRESS, nodePort),
-                    nodeId
-                )
+                DiscoveryNodeUtils.builder(nodeId)
+                    .applySettings(nodeSettingsBuilder.build())
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .build()
             );
         }
 
@@ -283,7 +291,12 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 .put(Node.NODE_NAME_SETTING.getKey(), nodeName)
                 .put(Node.NODE_ATTRIBUTES.getKey() + nodeAttr.getKey(), nodeAttr.getValue())
                 .build();
-            nodes.add(DiscoveryNode.createLocal(nodeSettings, new TransportAddress(TransportAddress.META_ADDRESS, nodePort), nodeId));
+            nodes.add(
+                DiscoveryNodeUtils.builder(nodeId)
+                    .applySettings(nodeSettings)
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .build()
+            );
             validNodeIds.add(nodeId);
         }
 
@@ -314,13 +327,7 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
             return null;
         }).when(indicesClient).updateSettings(Mockito.any(), Mockito.any());
 
-        assertSame(
-            exception,
-            expectThrows(
-                Exception.class,
-                () -> PlainActionFuture.<Void, Exception>get(f -> step.performAction(indexMetadata, clusterState, null, f))
-            )
-        );
+        assertSame(exception, expectThrows(Exception.class, () -> performActionAndWait(step, indexMetadata, clusterState, null)));
 
         Mockito.verify(client, Mockito.only()).admin();
         Mockito.verify(adminClient, Mockito.only()).indices();
@@ -352,7 +359,12 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 .put(Node.NODE_NAME_SETTING.getKey(), nodeName)
                 .put(Node.NODE_ATTRIBUTES.getKey() + nodeAttr.getKey(), nodeAttr.getValue())
                 .build();
-            nodes.add(DiscoveryNode.createLocal(nodeSettings, new TransportAddress(TransportAddress.META_ADDRESS, nodePort), nodeId));
+            nodes.add(
+                DiscoveryNodeUtils.builder(nodeId)
+                    .applySettings(nodeSettings)
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .build()
+            );
         }
 
         Map<String, IndexMetadata> indices = Map.of(index.getName(), indexMetadata);
@@ -367,7 +379,7 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
 
         IndexNotFoundException e = expectThrows(
             IndexNotFoundException.class,
-            () -> PlainActionFuture.<Void, Exception>get(f -> step.performAction(indexMetadata, clusterState, null, f))
+            () -> performActionAndWait(step, indexMetadata, clusterState, null)
         );
         assertEquals(indexMetadata.getIndex(), e.getIndex());
 
@@ -381,7 +393,7 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 Version.fromId(Version.CURRENT.major * 1_000_000 + 99),
                 VersionUtils.getPreviousVersion()
             ),
-            IndexVersion.MINIMUM_COMPATIBLE,
+            IndexVersions.MINIMUM_COMPATIBLE,
             IndexVersionUtils.randomCompatibleVersion(random())
         );
         final int numNodes = randomIntBetween(2, 20); // Need at least 2 nodes to have some nodes on a new version
@@ -422,14 +434,13 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
             Settings nodeSettings = Settings.builder().put(Node.NODE_NAME_SETTING.getKey(), nodeName).build();
             oldNodeIds.add(nodeId);
             nodes.add(
-                new DiscoveryNode(
-                    Node.NODE_NAME_SETTING.get(nodeSettings),
-                    nodeId,
-                    new TransportAddress(TransportAddress.META_ADDRESS, nodePort),
-                    Node.NODE_ATTRIBUTES.getAsMap(nodeSettings),
-                    DiscoveryNode.getRolesFromSettings(nodeSettings),
-                    oldVersion
-                )
+                DiscoveryNodeUtils.builder(nodeId)
+                    .name(Node.NODE_NAME_SETTING.get(nodeSettings))
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .attributes(Node.NODE_ATTRIBUTES.getAsMap(nodeSettings))
+                    .roles(DiscoveryNode.getRolesFromSettings(nodeSettings))
+                    .version(oldVersion)
+                    .build()
             );
         }
 
@@ -451,7 +462,7 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 Version.fromId(Version.CURRENT.major * 1_000_000 + 99),
                 VersionUtils.getPreviousVersion()
             ),
-            IndexVersion.MINIMUM_COMPATIBLE,
+            IndexVersions.MINIMUM_COMPATIBLE,
             IndexVersionUtils.randomCompatibleVersion(random())
         );
         final int numNodes = randomIntBetween(2, 20); // Need at least 2 nodes to have some nodes on a new version
@@ -502,14 +513,13 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 .build();
             oldNodeIds.add(nodeId);
             nodes.add(
-                new DiscoveryNode(
-                    Node.NODE_NAME_SETTING.get(nodeSettings),
-                    nodeId,
-                    new TransportAddress(TransportAddress.META_ADDRESS, nodePort),
-                    Node.NODE_ATTRIBUTES.getAsMap(nodeSettings),
-                    DiscoveryNode.getRolesFromSettings(nodeSettings),
-                    oldVersion
-                )
+                DiscoveryNodeUtils.builder(nodeId)
+                    .name(Node.NODE_NAME_SETTING.get(nodeSettings))
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .attributes(Node.NODE_ATTRIBUTES.getAsMap(nodeSettings))
+                    .roles(DiscoveryNode.getRolesFromSettings(nodeSettings))
+                    .version(oldVersion)
+                    .build()
             );
         }
         Set<String> nodeIds = new HashSet<>();
@@ -529,7 +539,7 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 Version.fromId(Version.CURRENT.major * 1_000_000 + 99),
                 VersionUtils.getPreviousVersion()
             ),
-            IndexVersion.MINIMUM_COMPATIBLE,
+            IndexVersions.MINIMUM_COMPATIBLE,
             IndexVersionUtils.randomCompatibleVersion(random())
         );
         final int numNodes = randomIntBetween(2, 20); // Need at least 2 nodes to have some nodes on a new version
@@ -580,14 +590,13 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
                 .build();
             oldNodeIds.add(nodeId);
             nodes.add(
-                new DiscoveryNode(
-                    Node.NODE_NAME_SETTING.get(nodeSettings),
-                    nodeId,
-                    new TransportAddress(TransportAddress.META_ADDRESS, nodePort),
-                    Node.NODE_ATTRIBUTES.getAsMap(nodeSettings),
-                    DiscoveryNode.getRolesFromSettings(nodeSettings),
-                    oldVersion
-                )
+                DiscoveryNodeUtils.builder(nodeId)
+                    .name(Node.NODE_NAME_SETTING.get(nodeSettings))
+                    .address(new TransportAddress(TransportAddress.META_ADDRESS, nodePort))
+                    .attributes(Node.NODE_ATTRIBUTES.getAsMap(nodeSettings))
+                    .roles(DiscoveryNode.getRolesFromSettings(nodeSettings))
+                    .version(oldVersion)
+                    .build()
             );
         }
         Set<String> nodeIds = new HashSet<>();
@@ -657,7 +666,7 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
             return null;
         }).when(indicesClient).updateSettings(Mockito.any(), Mockito.any());
 
-        PlainActionFuture.<Void, Exception>get(f -> step.performAction(indexMetadata, clusterState, null, f));
+        performActionAndWait(step, indexMetadata, clusterState, null);
 
         Mockito.verify(client, Mockito.only()).admin();
         Mockito.verify(adminClient, Mockito.only()).indices();
@@ -682,10 +691,7 @@ public class SetSingleNodeAllocateStepTests extends AbstractStepTestCase<SetSing
 
         SetSingleNodeAllocateStep step = createRandomInstance();
 
-        expectThrows(
-            NoNodeAvailableException.class,
-            () -> PlainActionFuture.<Void, Exception>get(f -> step.performAction(indexMetadata, clusterState, null, f))
-        );
+        expectThrows(NoNodeAvailableException.class, () -> performActionAndWait(step, indexMetadata, clusterState, null));
 
         Mockito.verifyNoMoreInteractions(client);
     }

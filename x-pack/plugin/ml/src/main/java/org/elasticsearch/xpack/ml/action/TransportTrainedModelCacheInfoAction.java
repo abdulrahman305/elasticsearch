@@ -7,6 +7,7 @@
 
 package org.elasticsearch.xpack.ml.action;
 
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.action.FailedNodeException;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.nodes.TransportNodesAction;
@@ -15,6 +16,7 @@ import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.core.UpdateForV9;
 import org.elasticsearch.tasks.CancellableTask;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.tasks.TaskId;
@@ -47,11 +49,9 @@ public class TransportTrainedModelCacheInfoAction extends TransportNodesAction<
     ) {
         super(
             TrainedModelCacheInfoAction.NAME,
-            threadPool,
             clusterService,
             transportService,
             actionFilters,
-            TrainedModelCacheInfoAction.Request::new,
             NodeModelCacheInfoRequest::new,
             threadPool.executor(ThreadPool.Names.MANAGEMENT)
         );
@@ -69,7 +69,7 @@ public class TransportTrainedModelCacheInfoAction extends TransportNodesAction<
 
     @Override
     protected NodeModelCacheInfoRequest newNodeRequest(TrainedModelCacheInfoAction.Request request) {
-        return new NodeModelCacheInfoRequest(request);
+        return new NodeModelCacheInfoRequest();
     }
 
     @Override
@@ -87,17 +87,14 @@ public class TransportTrainedModelCacheInfoAction extends TransportNodesAction<
         );
     }
 
+    @UpdateForV9 // this can be replaced with TransportRequest.Empty in v9
     public static class NodeModelCacheInfoRequest extends TransportRequest {
 
-        TrainedModelCacheInfoAction.Request request;
+        NodeModelCacheInfoRequest() {}
 
         public NodeModelCacheInfoRequest(StreamInput in) throws IOException {
             super(in);
-            request = new TrainedModelCacheInfoAction.Request(in);
-        }
-
-        NodeModelCacheInfoRequest(TrainedModelCacheInfoAction.Request request) {
-            this.request = request;
+            skipLegacyNodesRequestHeader(TransportVersions.DROP_UNUSED_NODES_REQUESTS, in);
         }
 
         @Override
@@ -108,7 +105,7 @@ public class TransportTrainedModelCacheInfoAction extends TransportNodesAction<
         @Override
         public void writeTo(StreamOutput out) throws IOException {
             super.writeTo(out);
-            request.writeTo(out);
+            sendLegacyNodesRequestHeader(TransportVersions.DROP_UNUSED_NODES_REQUESTS, out);
         }
     }
 }

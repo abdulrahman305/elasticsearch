@@ -17,6 +17,7 @@ import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.core.TimeValue;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -27,14 +28,15 @@ public class MigrateToDataStreamAction extends ActionType<AcknowledgedResponse> 
     public static final String NAME = "indices:admin/data_stream/migrate";
 
     private MigrateToDataStreamAction() {
-        super(NAME, AcknowledgedResponse::readFrom);
+        super(NAME);
     }
 
     public static class Request extends AcknowledgedRequest<MigrateToDataStreamAction.Request> implements IndicesRequest {
 
         private final String aliasName;
 
-        public Request(String aliasName) {
+        public Request(TimeValue masterNodeTimeout, TimeValue ackTimeout, String aliasName) {
+            super(masterNodeTimeout, ackTimeout);
             this.aliasName = aliasName;
         }
 

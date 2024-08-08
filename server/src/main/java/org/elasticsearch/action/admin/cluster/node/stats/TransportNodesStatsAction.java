@@ -8,15 +8,25 @@
 
 package org.elasticsearch.action.admin.cluster.node.stats;
 
+import org.elasticsearch.TransportVersions;
+import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.FailedNodeException;
+import org.elasticsearch.action.admin.cluster.allocation.TransportGetAllocationStatsAction;
+import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsRequestParameters.Metric;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.nodes.TransportNodesAction;
+import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.cluster.routing.allocation.DiskThresholdSettings;
+import org.elasticsearch.cluster.routing.allocation.NodeAllocationStats;
 import org.elasticsearch.cluster.service.ClusterService;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.node.NodeService;
+import org.elasticsearch.rest.RestUtils;
 import org.elasticsearch.tasks.CancellableTask;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.tasks.TaskId;
@@ -26,9 +36,10 @@ import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.transport.Transports;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
 
 public class TransportNodesStatsAction extends TransportNodesAction<
     NodesStatsRequest,
@@ -36,32 +47,74 @@ public class TransportNodesStatsAction extends TransportNodesAction<
     TransportNodesStatsAction.NodeStatsRequest,
     NodeStats> {
 
+    public static final ActionType<NodesStatsResponse> TYPE = new ActionType<>("cluster:monitor/nodes/stats");
+
     private final NodeService nodeService;
+    private final NodeClient client;
 
     @Inject
     public TransportNodesStatsAction(
         ThreadPool threadPool,
         ClusterService clusterService,
         TransportService transportService,
+        ActionFilters actionFilters,
         NodeService nodeService,
-        ActionFilters actionFilters
+        NodeClient client
     ) {
         super(
-            NodesStatsAction.NAME,
-            threadPool,
+            TYPE.name(),
             clusterService,
             transportService,
             actionFilters,
-            NodesStatsRequest::new,
             NodeStatsRequest::new,
             threadPool.executor(ThreadPool.Names.MANAGEMENT)
         );
         this.nodeService = nodeService;
+        this.client = client;
     }
 
     @Override
     protected NodesStatsResponse newResponse(NodesStatsRequest request, List<NodeStats> responses, List<FailedNodeException> failures) {
         return new NodesStatsResponse(clusterService.getClusterName(), responses, failures);
+    }
+
+    @Override
+    protected void newResponseAsync(
+        Task task,
+        NodesStatsRequest request,
+        List<NodeStats> responses,
+        List<FailedNodeException> failures,
+        ActionListener<NodesStatsResponse> listener
+    ) {
+        var metrics = request.getNodesStatsRequestParameters().requestedMetrics();
+        if (metrics.contains(Metric.FS) || metrics.contains(Metric.ALLOCATIONS)) {
+            client.execute(
+                TransportGetAllocationStatsAction.TYPE,
+                new TransportGetAllocationStatsAction.Request(
+                    Objects.requireNonNullElse(request.timeout(), RestUtils.REST_MASTER_TIMEOUT_DEFAULT),
+                    new TaskId(clusterService.localNode().getId(), task.getId()),
+                    metrics
+                ),
+                listener.delegateFailure(
+                    (l, r) -> ActionListener.respondAndRelease(
+                        l,
+                        newResponse(request, merge(responses, r.getNodeAllocationStats(), r.getDiskThresholdSettings()), failures)
+                    )
+                )
+            );
+        } else {
+            ActionListener.run(listener, l -> ActionListener.respondAndRelease(l, newResponse(request, responses, failures)));
+        }
+    }
+
+    private static List<NodeStats> merge(
+        List<NodeStats> responses,
+        Map<String, NodeAllocationStats> allocationStats,
+        DiskThresholdSettings masterThresholdSettings
+    ) {
+        return responses.stream()
+            .map(response -> response.withNodeAllocationStats(allocationStats.get(response.getNode().getId()), masterThresholdSettings))
+            .toList();
     }
 
     @Override
@@ -76,42 +129,49 @@ public class TransportNodesStatsAction extends TransportNodesAction<
     }
 
     @Override
-    protected NodeStats nodeOperation(NodeStatsRequest nodeStatsRequest, Task task) {
+    protected NodeStats nodeOperation(NodeStatsRequest request, Task task) {
         assert task instanceof CancellableTask;
 
-        NodesStatsRequest request = nodeStatsRequest.request;
-        Set<String> metrics = request.requestedMetrics();
+        final var nodesStatsRequestParameters = request.getNodesStatsRequestParameters();
+        final var metrics = nodesStatsRequestParameters.requestedMetrics();
+
         return nodeService.stats(
-            request.indices(),
-            NodesStatsRequest.Metric.OS.containedIn(metrics),
-            NodesStatsRequest.Metric.PROCESS.containedIn(metrics),
-            NodesStatsRequest.Metric.JVM.containedIn(metrics),
-            NodesStatsRequest.Metric.THREAD_POOL.containedIn(metrics),
-            NodesStatsRequest.Metric.FS.containedIn(metrics),
-            NodesStatsRequest.Metric.TRANSPORT.containedIn(metrics),
-            NodesStatsRequest.Metric.HTTP.containedIn(metrics),
-            NodesStatsRequest.Metric.BREAKER.containedIn(metrics),
-            NodesStatsRequest.Metric.SCRIPT.containedIn(metrics),
-            NodesStatsRequest.Metric.DISCOVERY.containedIn(metrics),
-            NodesStatsRequest.Metric.INGEST.containedIn(metrics),
-            NodesStatsRequest.Metric.ADAPTIVE_SELECTION.containedIn(metrics),
-            NodesStatsRequest.Metric.SCRIPT_CACHE.containedIn(metrics),
-            NodesStatsRequest.Metric.INDEXING_PRESSURE.containedIn(metrics),
-            NodesStatsRequest.Metric.REPOSITORIES.containedIn(metrics)
+            nodesStatsRequestParameters.indices(),
+            nodesStatsRequestParameters.includeShardsStats(),
+            metrics.contains(Metric.OS),
+            metrics.contains(Metric.PROCESS),
+            metrics.contains(Metric.JVM),
+            metrics.contains(Metric.THREAD_POOL),
+            metrics.contains(Metric.FS),
+            metrics.contains(Metric.TRANSPORT),
+            metrics.contains(Metric.HTTP),
+            metrics.contains(Metric.BREAKER),
+            metrics.contains(Metric.SCRIPT),
+            metrics.contains(Metric.DISCOVERY),
+            metrics.contains(Metric.INGEST),
+            metrics.contains(Metric.ADAPTIVE_SELECTION),
+            metrics.contains(Metric.SCRIPT_CACHE),
+            metrics.contains(Metric.INDEXING_PRESSURE),
+            metrics.contains(Metric.REPOSITORIES)
         );
     }
 
     public static class NodeStatsRequest extends TransportRequest {
 
-        NodesStatsRequest request;
+        private final NodesStatsRequestParameters nodesStatsRequestParameters;
 
         public NodeStatsRequest(StreamInput in) throws IOException {
             super(in);
-            request = new NodesStatsRequest(in);
+            skipLegacyNodesRequestHeader(TransportVersions.V_8_13_0, in);
+            this.nodesStatsRequestParameters = new NodesStatsRequestParameters(in);
+            if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_13_0)
+                && in.getTransportVersion().before(TransportVersions.DROP_UNUSED_NODES_IDS)) {
+                in.readStringArray(); // formerly nodeIds, now unused
+            }
         }
 
         NodeStatsRequest(NodesStatsRequest request) {
-            this.request = request;
+            this.nodesStatsRequestParameters = request.getNodesStatsRequestParameters();
         }
 
         @Override
@@ -119,7 +179,11 @@ public class TransportNodesStatsAction extends TransportNodesAction<
             return new CancellableTask(id, type, action, "", parentTaskId, headers) {
                 @Override
                 public String getDescription() {
-                    return request.getDescription();
+                    return Strings.format(
+                        "metrics=%s, flags=%s",
+                        nodesStatsRequestParameters.requestedMetrics().toString(),
+                        Arrays.toString(nodesStatsRequestParameters.indices().getFlags())
+                    );
                 }
             };
         }
@@ -127,7 +191,16 @@ public class TransportNodesStatsAction extends TransportNodesAction<
         @Override
         public void writeTo(StreamOutput out) throws IOException {
             super.writeTo(out);
-            request.writeTo(out);
+            sendLegacyNodesRequestHeader(TransportVersions.V_8_13_0, out);
+            nodesStatsRequestParameters.writeTo(out);
+            if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_13_0)
+                && out.getTransportVersion().before(TransportVersions.DROP_UNUSED_NODES_IDS)) {
+                out.writeStringArray(Strings.EMPTY_ARRAY); // formerly nodeIds, now unused
+            }
+        }
+
+        public NodesStatsRequestParameters getNodesStatsRequestParameters() {
+            return nodesStatsRequestParameters;
         }
     }
 }

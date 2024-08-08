@@ -19,7 +19,11 @@ import org.elasticsearch.common.ParsingException;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.regex.Regex;
 import org.elasticsearch.common.util.ByteUtils;
+import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.features.NodeFeature;
+import org.elasticsearch.index.IndexVersions;
+import org.elasticsearch.index.mapper.TimeSeriesRoutingHashFieldMapper;
 import org.elasticsearch.transport.Transports;
 import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentParser.Token;
@@ -34,6 +38,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.Predicate;
@@ -44,6 +49,9 @@ import static org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpect
  * Generates the shard id for {@code (id, routing)} pairs.
  */
 public abstract class IndexRouting {
+
+    static final NodeFeature BOOLEAN_ROUTING_PATH = new NodeFeature("routing.boolean_routing_path");
+
     /**
      * Build the routing from {@link IndexMetadata}.
      */
@@ -73,7 +81,13 @@ public abstract class IndexRouting {
      * Called when indexing a document to generate the shard id that should contain
      * a document with the provided parameters.
      */
-    public abstract int indexShard(String id, @Nullable String routing, XContentType sourceType, BytesReference source);
+    public abstract int indexShard(
+        String id,
+        @Nullable String routing,
+        XContentType sourceType,
+        BytesReference source,
+        Consumer<String> routingHashSetter
+    );
 
     /**
      * Called when updating a document to generate the shard id that should contain
@@ -141,18 +155,23 @@ public abstract class IndexRouting {
 
         @Override
         public void process(IndexRequest indexRequest) {
-            if ("".equals(indexRequest.id())) {
-                throw new IllegalArgumentException("if _id is specified it must not be empty");
-            }
-
             // generate id if not already provided
-            if (indexRequest.id() == null) {
+            final String id = indexRequest.id();
+            if (id == null) {
                 indexRequest.autoGenerateId();
+            } else if (id.isEmpty()) {
+                throw new IllegalArgumentException("if _id is specified it must not be empty");
             }
         }
 
         @Override
-        public int indexShard(String id, @Nullable String routing, XContentType sourceType, BytesReference source) {
+        public int indexShard(
+            String id,
+            @Nullable String routing,
+            XContentType sourceType,
+            BytesReference source,
+            Consumer<String> routingHashSetter
+        ) {
             if (id == null) {
                 throw new IllegalStateException("id is required and should have been set by process");
             }
@@ -236,25 +255,41 @@ public abstract class IndexRouting {
     public static class ExtractFromSource extends IndexRouting {
         private final Predicate<String> isRoutingPath;
         private final XContentParserConfiguration parserConfig;
+        private final boolean trackTimeSeriesRoutingHash;
 
         ExtractFromSource(IndexMetadata metadata) {
             super(metadata);
             if (metadata.isRoutingPartitionedIndex()) {
                 throw new IllegalArgumentException("routing_partition_size is incompatible with routing_path");
             }
+            trackTimeSeriesRoutingHash = metadata.getCreationVersion().onOrAfter(IndexVersions.TIME_SERIES_ROUTING_HASH_IN_ID);
             List<String> routingPaths = metadata.getRoutingPaths();
             isRoutingPath = Regex.simpleMatcher(routingPaths.toArray(String[]::new));
             this.parserConfig = XContentParserConfiguration.EMPTY.withFiltering(Set.copyOf(routingPaths), null, true);
+        }
+
+        public boolean matchesField(String fieldName) {
+            return isRoutingPath.test(fieldName);
         }
 
         @Override
         public void process(IndexRequest indexRequest) {}
 
         @Override
-        public int indexShard(String id, @Nullable String routing, XContentType sourceType, BytesReference source) {
+        public int indexShard(
+            String id,
+            @Nullable String routing,
+            XContentType sourceType,
+            BytesReference source,
+            Consumer<String> routingHashSetter
+        ) {
             assert Transports.assertNotTransportThread("parsing the _source can get slow");
             checkNoRouting(routing);
-            return hashToShardId(hashSource(sourceType, source).buildHash(IndexRouting.ExtractFromSource::defaultOnEmpty));
+            int hash = hashSource(sourceType, source).buildHash(IndexRouting.ExtractFromSource::defaultOnEmpty);
+            if (trackTimeSeriesRoutingHash) {
+                routingHashSetter.accept(TimeSeriesRoutingHashFieldMapper.encode(hash));
+            }
+            return hashToShardId(hash);
         }
 
         public String createId(XContentType sourceType, BytesReference source, byte[] suffix) {
@@ -281,16 +316,14 @@ public abstract class IndexRouting {
 
         private Builder hashSource(XContentType sourceType, BytesReference source) {
             Builder b = builder();
-            try {
-                try (XContentParser parser = sourceType.xContent().createParser(parserConfig, source.streamInput())) {
-                    parser.nextToken(); // Move to first token
-                    if (parser.currentToken() == null) {
-                        throw new IllegalArgumentException("Error extracting routing: source didn't contain any routing fields");
-                    }
-                    parser.nextToken();
-                    b.extractObject(null, parser);
-                    ensureExpectedToken(null, parser.nextToken(), parser);
+            try (XContentParser parser = XContentHelper.createParserNotCompressed(parserConfig, source, sourceType)) {
+                parser.nextToken(); // Move to first token
+                if (parser.currentToken() == null) {
+                    throw new IllegalArgumentException("Error extracting routing: source didn't contain any routing fields");
                 }
+                parser.nextToken();
+                b.extractObject(null, parser);
+                ensureExpectedToken(null, parser.nextToken(), parser);
             } catch (IOException | ParsingException e) {
                 throw new IllegalArgumentException("Error extracting routing: " + e.getMessage(), e);
             }
@@ -331,6 +364,8 @@ public abstract class IndexRouting {
                         source.nextToken();
                         break;
                     case VALUE_STRING:
+                    case VALUE_NUMBER:
+                    case VALUE_BOOLEAN:
                         hashes.add(new NameAndHash(new BytesRef(path), hash(new BytesRef(source.text()))));
                         source.nextToken();
                         break;

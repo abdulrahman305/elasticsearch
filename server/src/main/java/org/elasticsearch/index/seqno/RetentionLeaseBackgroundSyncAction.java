@@ -81,7 +81,10 @@ public class RetentionLeaseBackgroundSyncAction extends TransportReplicationActi
             actionFilters,
             Request::new,
             Request::new,
-            threadPool.executor(ThreadPool.Names.MANAGEMENT)
+            threadPool.executor(ThreadPool.Names.MANAGEMENT),
+            SyncGlobalCheckpointAfterOperation.DoNotSync,
+            PrimaryActionExecution.RejectOnOverload,
+            ReplicaActionExecution.SubjectToCircuitBreaker
         );
     }
 
@@ -117,7 +120,7 @@ public class RetentionLeaseBackgroundSyncAction extends TransportReplicationActi
                 }
 
                 @Override
-                public Executor executor(ThreadPool threadPool) {
+                public Executor executor() {
                     return TransportResponseHandler.TRANSPORT_WORKER;
                 }
 

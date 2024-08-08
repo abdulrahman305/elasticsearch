@@ -16,11 +16,14 @@ import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.core.TimeValue;
 
 import java.io.IOException;
 import java.util.Objects;
 
-public class ClusterSearchShardsRequest extends MasterNodeReadRequest<ClusterSearchShardsRequest> implements IndicesRequest.Replaceable {
+public final class ClusterSearchShardsRequest extends MasterNodeReadRequest<ClusterSearchShardsRequest>
+    implements
+        IndicesRequest.Replaceable {
 
     private String[] indices = Strings.EMPTY_ARRAY;
     @Nullable
@@ -29,20 +32,16 @@ public class ClusterSearchShardsRequest extends MasterNodeReadRequest<ClusterSea
     private String preference;
     private IndicesOptions indicesOptions = IndicesOptions.lenientExpandOpen();
 
-    public ClusterSearchShardsRequest() {}
-
-    @SuppressWarnings("this-escape")
-    public ClusterSearchShardsRequest(String... indices) {
+    public ClusterSearchShardsRequest(TimeValue masterNodeTimeout, String... indices) {
+        super(masterNodeTimeout);
         indices(indices);
     }
 
     public ClusterSearchShardsRequest(StreamInput in) throws IOException {
         super(in);
         indices = in.readStringArray();
-
         routing = in.readOptionalString();
         preference = in.readOptionalString();
-
         indicesOptions = IndicesOptions.readIndicesOptions(in);
     }
 
@@ -52,7 +51,6 @@ public class ClusterSearchShardsRequest extends MasterNodeReadRequest<ClusterSea
         out.writeStringArray(indices);
         out.writeOptionalString(routing);
         out.writeOptionalString(preference);
-
         indicesOptions.writeIndicesOptions(out);
     }
 

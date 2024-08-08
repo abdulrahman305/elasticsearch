@@ -26,13 +26,6 @@ public class WatcherStatsRequest extends BaseNodesRequest<WatcherStatsRequest> {
         super((String[]) null);
     }
 
-    public WatcherStatsRequest(StreamInput in) throws IOException {
-        super(in);
-        includeCurrentWatches = in.readBoolean();
-        includeQueuedWatches = in.readBoolean();
-        includeStats = in.readBoolean();
-    }
-
     public boolean includeCurrentWatches() {
         return includeCurrentWatches;
     }
@@ -55,14 +48,6 @@ public class WatcherStatsRequest extends BaseNodesRequest<WatcherStatsRequest> {
 
     public void includeStats(boolean includeStats) {
         this.includeStats = includeStats;
-    }
-
-    @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        super.writeTo(out);
-        out.writeBoolean(includeCurrentWatches);
-        out.writeBoolean(includeQueuedWatches);
-        out.writeBoolean(includeStats);
     }
 
     @Override

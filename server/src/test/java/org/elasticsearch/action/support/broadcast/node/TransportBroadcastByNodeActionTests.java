@@ -168,12 +168,12 @@ public class TransportBroadcastByNodeActionTests extends ESTestCase {
         TestTransportBroadcastByNodeAction(String actionName) {
             super(
                 actionName,
-                clusterService,
-                transportService,
+                TransportBroadcastByNodeActionTests.this.clusterService,
+                TransportBroadcastByNodeActionTests.this.transportService,
                 new ActionFilters(Set.of()),
                 new MyResolver(),
                 Request::new,
-                transportService.getThreadPool().executor(TEST_THREAD_POOL_NAME)
+                TransportBroadcastByNodeActionTests.this.transportService.getThreadPool().executor(TEST_THREAD_POOL_NAME)
             );
         }
 
@@ -246,11 +246,7 @@ public class TransportBroadcastByNodeActionTests extends ESTestCase {
     private static final String TEST_THREAD_POOL_NAME = "test_thread_pool";
 
     private static void awaitForkedTasks() {
-        PlainActionFuture.get(
-            listener -> THREAD_POOL.executor(TEST_THREAD_POOL_NAME).execute(ActionRunnable.run(listener, () -> {})),
-            10,
-            TimeUnit.SECONDS
-        );
+        safeAwait(listener -> THREAD_POOL.executor(TEST_THREAD_POOL_NAME).execute(ActionRunnable.run(listener, () -> {})));
     }
 
     @BeforeClass
@@ -347,13 +343,9 @@ public class TransportBroadcastByNodeActionTests extends ESTestCase {
 
         assertEquals(
             "blocked by: [SERVICE_UNAVAILABLE/1/test-block];",
-            expectThrows(
+            asInstanceOf(
                 ClusterBlockException.class,
-                () -> PlainActionFuture.<Response, RuntimeException>get(
-                    listener -> action.doExecute(null, request, listener),
-                    10,
-                    TimeUnit.SECONDS
-                )
+                safeAwaitFailure(Response.class, listener -> action.doExecute(null, request, listener))
             ).getMessage()
         );
     }
@@ -369,13 +361,9 @@ public class TransportBroadcastByNodeActionTests extends ESTestCase {
         setState(clusterService, ClusterState.builder(clusterService.state()).blocks(block));
         assertEquals(
             "index [" + TEST_INDEX + "] blocked by: [SERVICE_UNAVAILABLE/1/test-block];",
-            expectThrows(
+            asInstanceOf(
                 ClusterBlockException.class,
-                () -> PlainActionFuture.<Response, RuntimeException>get(
-                    listener -> action.doExecute(null, request, listener),
-                    10,
-                    TimeUnit.SECONDS
-                )
+                safeAwaitFailure(Response.class, listener -> action.doExecute(null, request, listener))
             ).getMessage()
         );
     }
@@ -429,7 +417,7 @@ public class TransportBroadcastByNodeActionTests extends ESTestCase {
         final TransportBroadcastByNodeAction<Request, Response, ShardResult>.BroadcastByNodeTransportRequestHandler handler =
             action.new BroadcastByNodeTransportRequestHandler();
 
-        final PlainActionFuture<TransportResponse> future = PlainActionFuture.newFuture();
+        final PlainActionFuture<TransportResponse> future = new PlainActionFuture<>();
         TestTransportChannel channel = new TestTransportChannel(future);
 
         final CancellableTask cancellableTask = new CancellableTask(randomLong(), "transport", "action", "", null, emptyMap());
@@ -490,7 +478,7 @@ public class TransportBroadcastByNodeActionTests extends ESTestCase {
         final TransportBroadcastByNodeAction<Request, Response, ShardResult>.BroadcastByNodeTransportRequestHandler handler =
             action.new BroadcastByNodeTransportRequestHandler();
 
-        final PlainActionFuture<TransportResponse> future = PlainActionFuture.newFuture();
+        final PlainActionFuture<TransportResponse> future = new PlainActionFuture<>();
         TestTransportChannel channel = new TestTransportChannel(future);
 
         handler.messageReceived(action.new NodeRequest(new Request(), new ArrayList<>(shards), nodeId), channel, null);

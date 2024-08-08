@@ -12,8 +12,11 @@ import org.apache.logging.log4j.core.util.Throwables;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.PlainActionFuture;
+import org.elasticsearch.action.support.SubscribableListener;
+import org.elasticsearch.cluster.ClusterChangedEvent;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.ClusterState;
+import org.elasticsearch.cluster.ClusterStateListener;
 import org.elasticsearch.cluster.ClusterStateObserver;
 import org.elasticsearch.cluster.ClusterStatePublicationEvent;
 import org.elasticsearch.cluster.ClusterStateUpdateTask;
@@ -31,6 +34,7 @@ import org.elasticsearch.cluster.version.CompatibilityVersionsUtils;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.settings.ClusterSettings;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.node.NodeClosedException;
 import org.elasticsearch.tasks.TaskManager;
@@ -194,7 +198,7 @@ public class ClusterServiceUtils {
 
     public static void awaitClusterState(Logger logger, Predicate<ClusterState> statePredicate, ClusterService clusterService)
         throws Exception {
-        final PlainActionFuture<Void> future = PlainActionFuture.newFuture();
+        final PlainActionFuture<Void> future = new PlainActionFuture<>();
         ClusterStateObserver.waitForState(
             clusterService,
             clusterService.getClusterApplierService().threadPool().getThreadContext(),
@@ -222,8 +226,8 @@ public class ClusterServiceUtils {
     }
 
     public static void awaitNoPendingTasks(ClusterService clusterService) {
-        PlainActionFuture.<Void, RuntimeException>get(
-            fut -> clusterService.submitUnbatchedStateUpdateTask(
+        ESTestCase.safeAwait(
+            listener -> clusterService.submitUnbatchedStateUpdateTask(
                 "await-queue-empty",
                 new ClusterStateUpdateTask(Priority.LANGUID, TimeValue.timeValueSeconds(10)) {
                     @Override
@@ -233,17 +237,44 @@ public class ClusterServiceUtils {
 
                     @Override
                     public void onFailure(Exception e) {
-                        fut.onFailure(e);
+                        listener.onFailure(e);
                     }
 
                     @Override
                     public void clusterStateProcessed(ClusterState initialState, ClusterState newState) {
-                        fut.onResponse(null);
+                        listener.onResponse(null);
                     }
                 }
-            ),
-            10,
-            TimeUnit.SECONDS
+            )
         );
+    }
+
+    public static SubscribableListener<Void> addTemporaryStateListener(ClusterService clusterService, Predicate<ClusterState> predicate) {
+        final var listener = new SubscribableListener<Void>();
+        final ClusterStateListener clusterStateListener = new ClusterStateListener() {
+            @Override
+            public void clusterChanged(ClusterChangedEvent event) {
+                try {
+                    if (predicate.test(event.state())) {
+                        listener.onResponse(null);
+                    }
+                } catch (Exception e) {
+                    listener.onFailure(e);
+                }
+            }
+
+            @Override
+            public String toString() {
+                return predicate.toString();
+            }
+        };
+        clusterService.addListener(clusterStateListener);
+        listener.addListener(ActionListener.running(() -> clusterService.removeListener(clusterStateListener)));
+        if (predicate.test(clusterService.state())) {
+            listener.onResponse(null);
+        } else {
+            listener.addTimeout(TimeValue.timeValueSeconds(10), clusterService.threadPool(), EsExecutors.DIRECT_EXECUTOR_SERVICE);
+        }
+        return listener;
     }
 }

@@ -9,6 +9,7 @@
 package org.elasticsearch;
 
 import org.elasticsearch.core.Assertions;
+import org.elasticsearch.core.UpdateForV9;
 
 import java.lang.reflect.Field;
 import java.util.Collection;
@@ -19,7 +20,14 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.IntFunction;
 
+/**
+ * <p>Transport version is used to coordinate compatible wire protocol communication between nodes, at a fine-grained level.  This replaces
+ * and supersedes the old Version constants.</p>
+ *
+ * <p>Before adding a new version constant, please read the block comment at the end of the list of constants.</p>
+ */
 public class TransportVersions {
 
     /*
@@ -41,6 +49,7 @@ public class TransportVersions {
         return new TransportVersion(id);
     }
 
+    @UpdateForV9 // remove the transport versions with which v9 will not need to interact
     public static final TransportVersion ZERO = def(0);
     public static final TransportVersion V_7_0_0 = def(7_00_00_99);
     public static final TransportVersion V_7_0_1 = def(7_00_01_99);
@@ -84,67 +93,100 @@ public class TransportVersions {
      * READ THE COMMENT BELOW THIS BLOCK OF DECLARATIONS BEFORE ADDING NEW TRANSPORT VERSIONS
      * Detached transport versions added below here.
      */
-    public static final TransportVersion V_8_500_020 = def(8_500_020);
-    public static final TransportVersion V_8_500_021 = def(8_500_021);
-    public static final TransportVersion V_8_500_022 = def(8_500_022);
-    public static final TransportVersion V_8_500_023 = def(8_500_023);
-    public static final TransportVersion V_8_500_024 = def(8_500_024);
-    public static final TransportVersion V_8_500_025 = def(8_500_025);
-    public static final TransportVersion V_8_500_026 = def(8_500_026);
-    public static final TransportVersion V_8_500_027 = def(8_500_027);
-    public static final TransportVersion V_8_500_028 = def(8_500_028);
-    public static final TransportVersion V_8_500_029 = def(8_500_029);
-    public static final TransportVersion V_8_500_030 = def(8_500_030);
-    public static final TransportVersion V_8_500_031 = def(8_500_031);
-    public static final TransportVersion V_8_500_032 = def(8_500_032);
-    public static final TransportVersion V_8_500_033 = def(8_500_033);
-    public static final TransportVersion V_8_500_034 = def(8_500_034);
-    public static final TransportVersion V_8_500_035 = def(8_500_035);
-    public static final TransportVersion V_8_500_036 = def(8_500_036);
-    public static final TransportVersion V_8_500_037 = def(8_500_037);
-    public static final TransportVersion V_8_500_038 = def(8_500_038);
-    public static final TransportVersion V_8_500_039 = def(8_500_039);
-    public static final TransportVersion V_8_500_040 = def(8_500_040);
-    public static final TransportVersion V_8_500_041 = def(8_500_041);
-    public static final TransportVersion V_8_500_042 = def(8_500_042);
-    public static final TransportVersion V_8_500_043 = def(8_500_043);
-    public static final TransportVersion V_8_500_044 = def(8_500_044);
-    public static final TransportVersion V_8_500_045 = def(8_500_045);
-    public static final TransportVersion V_8_500_046 = def(8_500_046);
-    public static final TransportVersion V_8_500_047 = def(8_500_047);
-    public static final TransportVersion V_8_500_048 = def(8_500_048);
-    public static final TransportVersion V_8_500_049 = def(8_500_049);
-    public static final TransportVersion V_8_500_050 = def(8_500_050);
-    public static final TransportVersion V_8_500_051 = def(8_500_051);
-    public static final TransportVersion V_8_500_052 = def(8_500_052);
-    public static final TransportVersion V_8_500_053 = def(8_500_053);
-    public static final TransportVersion V_8_500_054 = def(8_500_054);
-    public static final TransportVersion V_8_500_055 = def(8_500_055);
-    public static final TransportVersion V_8_500_056 = def(8_500_056);
-    public static final TransportVersion V_8_500_057 = def(8_500_057);
-    public static final TransportVersion V_8_500_058 = def(8_500_058);
-    public static final TransportVersion V_8_500_059 = def(8_500_059);
-    public static final TransportVersion V_8_500_060 = def(8_500_060);
-    public static final TransportVersion V_8_500_061 = def(8_500_061);
-    public static final TransportVersion V_8_500_062 = def(8_500_062);
-    public static final TransportVersion V_8_500_063 = def(8_500_063);
-    public static final TransportVersion V_8_500_064 = def(8_500_064);
-    public static final TransportVersion V_8_500_065 = def(8_500_065);
-    public static final TransportVersion V_8_500_066 = def(8_500_066);
-    public static final TransportVersion SEARCH_RESP_SKIP_UNAVAILABLE_ADDED = def(8_500_067);
-    public static final TransportVersion ML_TRAINED_MODEL_FINISH_PENDING_WORK_ADDED = def(8_500_068);
-    public static final TransportVersion SEARCH_APP_INDICES_REMOVED = def(8_500_069);
-    public static final TransportVersion GENERIC_NAMED_WRITABLE_ADDED = def(8_500_070);
-    public static final TransportVersion PINNED_QUERY_OPTIONAL_INDEX = def(8_500_071);
-    public static final TransportVersion SHARD_SIZE_PRIMARY_TERM_GEN_ADDED = def(8_500_072);
-    public static final TransportVersion COMPAT_VERSIONS_MAPPING_VERSION_ADDED = def(8_500_073);
-    public static final TransportVersion V_8_500_074 = def(8_500_074);
-    public static final TransportVersion NODE_INFO_INDEX_VERSION_ADDED = def(8_500_075);
-    public static final TransportVersion FIRST_NEW_ID_LAYOUT = def(8_501_00_0);
-    public static final TransportVersion COMMIT_PRIMARY_TERM_GENERATION = def(8_501_00_1);
-    public static final TransportVersion WAIT_FOR_CLUSTER_STATE_IN_RECOVERY_ADDED = def(8_502_00_0);
-    public static final TransportVersion RECOVERY_COMMIT_TOO_NEW_EXCEPTION_ADDED = def(8_503_00_0);
-    public static final TransportVersion NODE_INFO_COMPONENT_VERSIONS_ADDED = def(8_504_00_0);
+    public static final TransportVersion V_8_9_X = def(8_500_020);
+    public static final TransportVersion V_8_10_X = def(8_500_061);
+    public static final TransportVersion V_8_11_X = def(8_512_00_1);
+    public static final TransportVersion V_8_12_0 = def(8_560_00_0);
+    public static final TransportVersion V_8_12_1 = def(8_560_00_1);
+    public static final TransportVersion V_8_13_0 = def(8_595_00_0);
+    public static final TransportVersion V_8_13_4 = def(8_595_00_1);
+    public static final TransportVersion V_8_14_0 = def(8_636_00_1);
+    // 8.15.0+
+    public static final TransportVersion WATERMARK_THRESHOLDS_STATS = def(8_637_00_0);
+    public static final TransportVersion ENRICH_CACHE_ADDITIONAL_STATS = def(8_638_00_0);
+    public static final TransportVersion ML_INFERENCE_RATE_LIMIT_SETTINGS_ADDED = def(8_639_00_0);
+    public static final TransportVersion ML_TRAINED_MODEL_CACHE_METADATA_ADDED = def(8_640_00_0);
+    public static final TransportVersion TOP_LEVEL_KNN_SUPPORT_QUERY_NAME = def(8_641_00_0);
+    public static final TransportVersion INDEX_SEGMENTS_VECTOR_FORMATS = def(8_642_00_0);
+    public static final TransportVersion ADD_RESOURCE_ALREADY_UPLOADED_EXCEPTION = def(8_643_00_0);
+    public static final TransportVersion ESQL_MV_ORDERING_SORTED_ASCENDING = def(8_644_00_0);
+    public static final TransportVersion ESQL_PAGE_MAPPING_TO_ITERATOR = def(8_645_00_0);
+    public static final TransportVersion BINARY_PIT_ID = def(8_646_00_0);
+    public static final TransportVersion SECURITY_ROLE_MAPPINGS_IN_CLUSTER_STATE = def(8_647_00_0);
+    public static final TransportVersion ESQL_REQUEST_TABLES = def(8_648_00_0);
+    public static final TransportVersion ROLE_REMOTE_CLUSTER_PRIVS = def(8_649_00_0);
+    public static final TransportVersion NO_GLOBAL_RETENTION_FOR_SYSTEM_DATA_STREAMS = def(8_650_00_0);
+    public static final TransportVersion SHUTDOWN_REQUEST_TIMEOUTS_FIX = def(8_651_00_0);
+    public static final TransportVersion INDEXING_PRESSURE_REQUEST_REJECTIONS_COUNT = def(8_652_00_0);
+    public static final TransportVersion ROLLUP_USAGE = def(8_653_00_0);
+    public static final TransportVersion SECURITY_ROLE_DESCRIPTION = def(8_654_00_0);
+    public static final TransportVersion ML_INFERENCE_AZURE_OPENAI_COMPLETIONS = def(8_655_00_0);
+    public static final TransportVersion JOIN_STATUS_AGE_SERIALIZATION = def(8_656_00_0);
+    public static final TransportVersion ML_RERANK_DOC_OPTIONAL = def(8_657_00_0);
+    public static final TransportVersion FAILURE_STORE_FIELD_PARITY = def(8_658_00_0);
+    public static final TransportVersion ML_INFERENCE_AZURE_AI_STUDIO = def(8_659_00_0);
+    public static final TransportVersion ML_INFERENCE_COHERE_COMPLETION_ADDED = def(8_660_00_0);
+    public static final TransportVersion ESQL_REMOVE_ES_SOURCE_OPTIONS = def(8_661_00_0);
+    public static final TransportVersion NODE_STATS_INGEST_BYTES = def(8_662_00_0);
+    public static final TransportVersion SEMANTIC_QUERY = def(8_663_00_0);
+    public static final TransportVersion GET_AUTOSCALING_CAPACITY_UNUSED_TIMEOUT = def(8_664_00_0);
+    public static final TransportVersion SIMULATE_VALIDATES_MAPPINGS = def(8_665_00_0);
+    public static final TransportVersion RULE_QUERY_RENAME = def(8_666_00_0);
+    public static final TransportVersion SPARSE_VECTOR_QUERY_ADDED = def(8_667_00_0);
+    public static final TransportVersion ESQL_ADD_INDEX_MODE_TO_SOURCE = def(8_668_00_0);
+    public static final TransportVersion GET_SHUTDOWN_STATUS_TIMEOUT = def(8_669_00_0);
+    public static final TransportVersion FAILURE_STORE_TELEMETRY = def(8_670_00_0);
+    public static final TransportVersion ADD_METADATA_FLATTENED_TO_ROLES = def(8_671_00_0);
+    public static final TransportVersion ML_INFERENCE_GOOGLE_AI_STUDIO_COMPLETION_ADDED = def(8_672_00_0);
+    public static final TransportVersion WATCHER_REQUEST_TIMEOUTS = def(8_673_00_0);
+    public static final TransportVersion ML_INFERENCE_ENHANCE_DELETE_ENDPOINT = def(8_674_00_0);
+    public static final TransportVersion ML_INFERENCE_GOOGLE_AI_STUDIO_EMBEDDINGS_ADDED = def(8_675_00_0);
+    public static final TransportVersion ADD_MISTRAL_EMBEDDINGS_INFERENCE = def(8_676_00_0);
+    public static final TransportVersion ML_CHUNK_INFERENCE_OPTION = def(8_677_00_0);
+    public static final TransportVersion RANK_FEATURE_PHASE_ADDED = def(8_678_00_0);
+    public static final TransportVersion RANK_DOC_IN_SHARD_FETCH_REQUEST = def(8_679_00_0);
+    public static final TransportVersion SECURITY_SETTINGS_REQUEST_TIMEOUTS = def(8_680_00_0);
+    public static final TransportVersion QUERY_RULE_CRUD_API_PUT = def(8_681_00_0);
+    public static final TransportVersion DROP_UNUSED_NODES_REQUESTS = def(8_682_00_0);
+    public static final TransportVersion QUERY_RULE_CRUD_API_GET_DELETE = def(8_683_00_0);
+    public static final TransportVersion MORE_LIGHTER_NODES_REQUESTS = def(8_684_00_0);
+    public static final TransportVersion DROP_UNUSED_NODES_IDS = def(8_685_00_0);
+    public static final TransportVersion DELETE_SNAPSHOTS_ASYNC_ADDED = def(8_686_00_0);
+    public static final TransportVersion VERSION_SUPPORTING_SPARSE_VECTOR_STATS = def(8_687_00_0);
+    public static final TransportVersion ML_AD_OUTPUT_MEMORY_ALLOCATOR_FIELD = def(8_688_00_0);
+    public static final TransportVersion FAILURE_STORE_LAZY_CREATION = def(8_689_00_0);
+    public static final TransportVersion SNAPSHOT_REQUEST_TIMEOUTS = def(8_690_00_0);
+    public static final TransportVersion INDEX_METADATA_MAPPINGS_UPDATED_VERSION = def(8_691_00_0);
+    public static final TransportVersion ML_INFERENCE_ELAND_SETTINGS_ADDED = def(8_692_00_0);
+    public static final TransportVersion ML_ANTHROPIC_INTEGRATION_ADDED = def(8_693_00_0);
+    public static final TransportVersion ML_INFERENCE_GOOGLE_VERTEX_AI_EMBEDDINGS_ADDED = def(8_694_00_0);
+    public static final TransportVersion EVENT_INGESTED_RANGE_IN_CLUSTER_STATE = def(8_695_00_0);
+    public static final TransportVersion ESQL_ADD_AGGREGATE_TYPE = def(8_696_00_0);
+    public static final TransportVersion SECURITY_MIGRATIONS_MIGRATION_NEEDED_ADDED = def(8_697_00_0);
+    public static final TransportVersion K_FOR_KNN_QUERY_ADDED = def(8_698_00_0);
+    public static final TransportVersion TEXT_SIMILARITY_RERANKER_RETRIEVER = def(8_699_00_0);
+    public static final TransportVersion ML_INFERENCE_GOOGLE_VERTEX_AI_RERANKING_ADDED = def(8_700_00_0);
+    public static final TransportVersion VERSIONED_MASTER_NODE_REQUESTS = def(8_701_00_0);
+    public static final TransportVersion ML_INFERENCE_AMAZON_BEDROCK_ADDED = def(8_702_00_0);
+    public static final TransportVersion ENTERPRISE_GEOIP_DOWNLOADER_BACKPORT_8_15 = def(8_702_00_1);
+    public static final TransportVersion FIX_VECTOR_SIMILARITY_INNER_HITS_BACKPORT_8_15 = def(8_702_00_2);
+    public static final TransportVersion ML_INFERENCE_DONT_DELETE_WHEN_SEMANTIC_TEXT_EXISTS = def(8_703_00_0);
+    public static final TransportVersion INFERENCE_ADAPTIVE_ALLOCATIONS = def(8_704_00_0);
+    public static final TransportVersion INDEX_REQUEST_UPDATE_BY_SCRIPT_ORIGIN = def(8_705_00_0);
+    public static final TransportVersion ML_INFERENCE_COHERE_UNUSED_RERANK_SETTINGS_REMOVED = def(8_706_00_0);
+    public static final TransportVersion ENRICH_CACHE_STATS_SIZE_ADDED = def(8_707_00_0);
+    public static final TransportVersion ENTERPRISE_GEOIP_DOWNLOADER = def(8_708_00_0);
+    public static final TransportVersion NODES_STATS_ENUM_SET = def(8_709_00_0);
+    public static final TransportVersion MASTER_NODE_METRICS = def(8_710_00_0);
+    public static final TransportVersion SEGMENT_LEVEL_FIELDS_STATS = def(8_711_00_0);
+    public static final TransportVersion ML_ADD_DETECTION_RULE_PARAMS = def(8_712_00_0);
+    public static final TransportVersion FIX_VECTOR_SIMILARITY_INNER_HITS = def(8_713_00_0);
+    public static final TransportVersion INDEX_REQUEST_UPDATE_BY_DOC_ORIGIN = def(8_714_00_0);
+    public static final TransportVersion ESQL_ATTRIBUTE_CACHED_SERIALIZATION = def(8_715_00_0);
+    public static final TransportVersion REGISTER_SLM_STATS = def(8_716_00_0);
+    public static final TransportVersion ESQL_NESTED_UNSUPPORTED = def(8_717_00_0);
+    public static final TransportVersion ESQL_SINGLE_VALUE_QUERY_SOURCE = def(8_718_00_0);
+    public static final TransportVersion ESQL_ORIGINAL_INDICES = def(8_719_00_0);
     /*
      * STOP! READ THIS FIRST! No, really,
      *        ____ _____ ___  ____  _        ____  _____    _    ____    _____ _   _ ___ ____    _____ ___ ____  ____ _____ _
@@ -185,15 +227,17 @@ public class TransportVersions {
      * If your git checkout has the expected minor-version-numbered branches and the expected release-version tags then you can find the
      * transport versions known by a particular release ...
      *
-     *     git show v8.9.1:server/src/main/java/org/elasticsearch/TransportVersions.java | grep def
+     *     git show v8.11.0:server/src/main/java/org/elasticsearch/TransportVersions.java | grep '= def'
      *
      * ... or by a particular branch ...
      *
-     *     git show 8.10:server/src/main/java/org/elasticsearch/TransportVersions.java | grep def
+     *     git show 8.11:server/src/main/java/org/elasticsearch/TransportVersions.java | grep '= def'
      *
      * ... and you can see which versions were added in between two versions too ...
      *
-     *     git diff 8.10..main -- server/src/main/java/org/elasticsearch/TransportVersions.java
+     *     git diff v8.11.0..main -- server/src/main/java/org/elasticsearch/TransportVersions.java
+     *
+     * In branches 8.7-8.10 see server/src/main/java/org/elasticsearch/TransportVersion.java for the equivalent definitions.
      */
 
     /**
@@ -206,7 +250,7 @@ public class TransportVersions {
      * Reference to the minimum transport version that can be used with CCS.
      * This should be the transport version used by the previous minor release.
      */
-    public static final TransportVersion MINIMUM_CCS_VERSION = V_8_500_061;
+    public static final TransportVersion MINIMUM_CCS_VERSION = V_8_14_0;
 
     static final NavigableMap<Integer, TransportVersion> VERSION_IDS = getAllVersionIds(TransportVersions.class);
 
@@ -262,6 +306,8 @@ public class TransportVersions {
     static Collection<TransportVersion> getAllVersions() {
         return VERSION_IDS.values();
     }
+
+    static final IntFunction<String> VERSION_LOOKUP = ReleaseVersions.generateVersionsLookup(TransportVersions.class);
 
     // no instance
     private TransportVersions() {}

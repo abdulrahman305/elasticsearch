@@ -16,9 +16,7 @@ import org.elasticsearch.rest.RestStatus;
 import java.io.IOException;
 import java.io.PrintWriter;
 
-public class NoShardAvailableActionException extends ElasticsearchException {
-
-    private static final StackTraceElement[] EMPTY_STACK_TRACE = new StackTraceElement[0];
+public final class NoShardAvailableActionException extends ElasticsearchException {
 
     // This is set so that no StackTrace is serialized in the scenario when we wrap other shard failures.
     // It isn't necessary to serialize this field over the wire as the empty stack trace is serialized instead.
@@ -28,22 +26,18 @@ public class NoShardAvailableActionException extends ElasticsearchException {
         return new NoShardAvailableActionException(null, msg, null, true);
     }
 
-    @SuppressWarnings("this-escape")
     public NoShardAvailableActionException(ShardId shardId) {
         this(shardId, null, null, false);
     }
 
-    @SuppressWarnings("this-escape")
     public NoShardAvailableActionException(ShardId shardId, String msg) {
         this(shardId, msg, null, false);
     }
 
-    @SuppressWarnings("this-escape")
     public NoShardAvailableActionException(ShardId shardId, String msg, Throwable cause) {
         this(shardId, msg, cause, false);
     }
 
-    @SuppressWarnings("this-escape")
     private NoShardAvailableActionException(ShardId shardId, String msg, Throwable cause, boolean onShardFailureWrapper) {
         super(msg, cause);
         setShard(shardId);
@@ -61,8 +55,8 @@ public class NoShardAvailableActionException extends ElasticsearchException {
     }
 
     @Override
-    public StackTraceElement[] getStackTrace() {
-        return onShardFailureWrapper ? EMPTY_STACK_TRACE : super.getStackTrace();
+    public Throwable fillInStackTrace() {
+        return this; // this exception doesn't imply a bug, no need for a stack trace
     }
 
     @Override
@@ -71,7 +65,7 @@ public class NoShardAvailableActionException extends ElasticsearchException {
             super.printStackTrace(s);
         } else {
             // Override to simply print the first line of the trace, which is the current exception.
-            // Since we aren't serializing the repetitive stacktrace onShardFailureWrapper, we shouldn't print it out either
+            // Note: This will also omit the cause chain or any suppressed exceptions.
             s.println(this);
         }
     }

@@ -12,6 +12,7 @@ import spock.lang.IgnoreIf
 
 import org.elasticsearch.gradle.VersionProperties
 import org.elasticsearch.gradle.fixtures.AbstractRestResourcesFuncTest
+import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
 
 @IgnoreIf({ os.isWindows() })
@@ -24,8 +25,6 @@ class LegacyYamlRestTestPluginFuncTest extends AbstractRestResourcesFuncTest {
 
     def "yamlRestTest does nothing when there are no tests"() {
         given:
-        // RestIntegTestTask not cc compatible due to
-        configurationCacheCompatible = false
         buildFile << """
         plugins {
           id 'elasticsearch.legacy-yaml-rest-test'
@@ -43,8 +42,6 @@ class LegacyYamlRestTestPluginFuncTest extends AbstractRestResourcesFuncTest {
 
     def "yamlRestTest executes and copies api and tests to correct source set"() {
         given:
-        // RestIntegTestTask not cc compatible due to
-        configurationCacheCompatible = false
         internalBuild()
         buildFile << """
             apply plugin: 'elasticsearch.legacy-yaml-rest-test'
@@ -56,9 +53,10 @@ class LegacyYamlRestTestPluginFuncTest extends AbstractRestResourcesFuncTest {
             // can't actually spin up test cluster from this test
            tasks.withType(Test).configureEach{ enabled = false }
 
+           def clazzpath = sourceSets.yamlRestTest.runtimeClasspath
            tasks.register("printYamlRestTestClasspath").configure {
                doLast {
-                   println sourceSets.yamlRestTest.runtimeClasspath.asPath
+                   println clazzpath.asPath
                }
            }
         """
@@ -207,5 +205,9 @@ echo "Running elasticsearch \$0"
                 it.add("extracted", buildExpanded)
             }
         """
+    }
+
+    GradleRunner gradleRunner(Object... arguments) {
+        return super.gradleRunner(arguments).withEnvironment([RUNTIME_JAVA_HOME: System.getProperty("java.home")])
     }
 }

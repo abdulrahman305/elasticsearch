@@ -10,15 +10,15 @@ package org.elasticsearch.xpack.esql.expression.function.scalar.math;
 import com.carrotsearch.randomizedtesting.annotations.Name;
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 
-import org.elasticsearch.xpack.esql.expression.function.AbstractFunctionTestCase;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.tree.Source;
+import org.elasticsearch.xpack.esql.expression.function.AbstractScalarFunctionTestCase;
 import org.elasticsearch.xpack.esql.expression.function.TestCaseSupplier;
-import org.elasticsearch.xpack.ql.expression.Expression;
-import org.elasticsearch.xpack.ql.tree.Source;
 
 import java.util.List;
 import java.util.function.Supplier;
 
-public class AcosTests extends AbstractFunctionTestCase {
+public class AcosTests extends AbstractScalarFunctionTestCase {
     public AcosTests(@Name("TestCase") Supplier<TestCaseSupplier.TestCase> testCaseSupplier) {
         this.testCase = testCaseSupplier.get();
     }
@@ -39,7 +39,7 @@ public class AcosTests extends AbstractFunctionTestCase {
                 Math.nextDown(-1d),
                 List.of(
                     "Line -1:-1: evaluation of [] failed, treating result as null. Only first 20 failures recorded.",
-                    "java.lang.ArithmeticException: Acos input out of range"
+                    "Line -1:-1: java.lang.ArithmeticException: Acos input out of range"
                 )
             )
         );
@@ -52,11 +52,11 @@ public class AcosTests extends AbstractFunctionTestCase {
                 Double.POSITIVE_INFINITY,
                 List.of(
                     "Line -1:-1: evaluation of [] failed, treating result as null. Only first 20 failures recorded.",
-                    "java.lang.ArithmeticException: Acos input out of range"
+                    "Line -1:-1: java.lang.ArithmeticException: Acos input out of range"
                 )
             )
         );
-        return parameterSuppliersFromTypedData(errorsForCasesWithoutExamples(suppliers));
+        return parameterSuppliersFromTypedData(errorsForCasesWithoutExamples(suppliers, (v, p) -> "numeric"));
     }
 
     @Override

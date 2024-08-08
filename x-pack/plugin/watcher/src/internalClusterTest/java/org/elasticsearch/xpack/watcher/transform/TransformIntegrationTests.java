@@ -6,8 +6,6 @@
  */
 package org.elasticsearch.xpack.watcher.transform;
 
-import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.core.Strings;
@@ -16,7 +14,6 @@ import org.elasticsearch.protocol.xpack.watcher.PutWatchResponse;
 import org.elasticsearch.script.MockScriptPlugin;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
-import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xpack.core.watcher.transport.actions.execute.ExecuteWatchRequestBuilder;
 import org.elasticsearch.xpack.core.watcher.transport.actions.put.PutWatchRequestBuilder;
 import org.elasticsearch.xpack.watcher.support.search.WatcherSearchTemplateRequest;
@@ -34,10 +31,10 @@ import java.util.Map;
 import java.util.function.Function;
 
 import static java.util.Collections.singletonMap;
+import static org.elasticsearch.action.admin.cluster.storedscripts.StoredScriptIntegTestUtils.putJsonStoredScript;
 import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
 import static org.elasticsearch.search.builder.SearchSourceBuilder.searchSource;
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailuresAndResponse;
 import static org.elasticsearch.xpack.watcher.actions.ActionBuilders.indexAction;
 import static org.elasticsearch.xpack.watcher.client.WatchSourceBuilders.watchBuilder;
 import static org.elasticsearch.xpack.watcher.input.InputBuilders.searchInput;
@@ -107,13 +104,13 @@ public class TransformIntegrationTests extends AbstractWatcherIntegrationTestCas
             script = mockScript("['key3' : ctx.payload.key1 + ctx.payload.key2]");
         } else {
             logger.info("testing script transform with an indexed script");
-            assertAcked(clusterAdmin().preparePutStoredScript().setId("my-script").setContent(new BytesArray(Strings.format("""
+            putJsonStoredScript("my-script", Strings.format("""
                 {
                   "script": {
                     "lang": "%s",
                     "source": "['key3' : ctx.payload.key1 + ctx.payload.key2]"
                   }
-                }""", MockScriptPlugin.NAME)), XContentType.JSON).get());
+                }""", MockScriptPlugin.NAME));
             script = new Script(ScriptType.STORED, null, "my-script", Collections.emptyMap());
         }
 
@@ -141,17 +138,17 @@ public class TransformIntegrationTests extends AbstractWatcherIntegrationTestCas
         assertWatchWithMinimumPerformedActionsCount("_id2", 1, false);
         refresh();
 
-        SearchResponse response = client().prepareSearch("output1").get();
-        assertNoFailures(response);
-        assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
-        assertThat(response.getHits().getAt(0).getSourceAsMap().size(), equalTo(1));
-        assertThat(response.getHits().getAt(0).getSourceAsMap().get("key3").toString(), equalTo("20"));
+        assertNoFailuresAndResponse(prepareSearch("output1"), response -> {
+            assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
+            assertThat(response.getHits().getAt(0).getSourceAsMap().size(), equalTo(1));
+            assertThat(response.getHits().getAt(0).getSourceAsMap().get("key3").toString(), equalTo("20"));
+        });
 
-        response = client().prepareSearch("output2").get();
-        assertNoFailures(response);
-        assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
-        assertThat(response.getHits().getAt(0).getSourceAsMap().size(), equalTo(1));
-        assertThat(response.getHits().getAt(0).getSourceAsMap().get("key3").toString(), equalTo("20"));
+        assertNoFailuresAndResponse(prepareSearch("output2"), response -> {
+            assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
+            assertThat(response.getHits().getAt(0).getSourceAsMap().size(), equalTo(1));
+            assertThat(response.getHits().getAt(0).getSourceAsMap().get("key3").toString(), equalTo("20"));
+        });
     }
 
     public void testSearchTransform() throws Exception {
@@ -186,15 +183,15 @@ public class TransformIntegrationTests extends AbstractWatcherIntegrationTestCas
         assertWatchWithMinimumPerformedActionsCount("_id2", 1, false);
         refresh();
 
-        SearchResponse response = client().prepareSearch("output1").get();
-        assertNoFailures(response);
-        assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
-        assertThat(response.getHits().getAt(0).getSourceAsString(), containsString("mytestresult"));
+        assertNoFailuresAndResponse(prepareSearch("output1"), response -> {
+            assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
+            assertThat(response.getHits().getAt(0).getSourceAsString(), containsString("mytestresult"));
+        });
 
-        response = client().prepareSearch("output2").get();
-        assertNoFailures(response);
-        assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
-        assertThat(response.getHits().getAt(0).getSourceAsString(), containsString("mytestresult"));
+        assertNoFailuresAndResponse(prepareSearch("output2"), response -> {
+            assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
+            assertThat(response.getHits().getAt(0).getSourceAsString(), containsString("mytestresult"));
+        });
     }
 
     public void testChainTransform() throws Exception {
@@ -225,17 +222,17 @@ public class TransformIntegrationTests extends AbstractWatcherIntegrationTestCas
         assertWatchWithMinimumPerformedActionsCount("_id2", 1, false);
         refresh();
 
-        SearchResponse response = client().prepareSearch("output1").get();
-        assertNoFailures(response);
-        assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
-        assertThat(response.getHits().getAt(0).getSourceAsMap().size(), equalTo(1));
-        assertThat(response.getHits().getAt(0).getSourceAsMap().get("key4").toString(), equalTo("30"));
+        assertNoFailuresAndResponse(prepareSearch("output1"), response -> {
+            assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
+            assertThat(response.getHits().getAt(0).getSourceAsMap().size(), equalTo(1));
+            assertThat(response.getHits().getAt(0).getSourceAsMap().get("key4").toString(), equalTo("30"));
+        });
 
-        response = client().prepareSearch("output2").get();
-        assertNoFailures(response);
-        assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
-        assertThat(response.getHits().getAt(0).getSourceAsMap().size(), equalTo(1));
-        assertThat(response.getHits().getAt(0).getSourceAsMap().get("key4").toString(), equalTo("30"));
+        assertNoFailuresAndResponse(prepareSearch("output2"), response -> {
+            assertThat(response.getHits().getTotalHits().value, greaterThanOrEqualTo(1L));
+            assertThat(response.getHits().getAt(0).getSourceAsMap().size(), equalTo(1));
+            assertThat(response.getHits().getAt(0).getSourceAsMap().get("key4").toString(), equalTo("30"));
+        });
     }
 
     private void executeWatch(String watchId) {

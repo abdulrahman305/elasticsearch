@@ -25,23 +25,12 @@ public class EsqlStatsRequest extends BaseNodesRequest<EsqlStatsRequest> {
         super((String[]) null);
     }
 
-    public EsqlStatsRequest(StreamInput in) throws IOException {
-        super(in);
-        includeStats = in.readBoolean();
-    }
-
     public boolean includeStats() {
         return includeStats;
     }
 
     public void includeStats(boolean includeStats) {
         this.includeStats = includeStats;
-    }
-
-    @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        super.writeTo(out);
-        out.writeBoolean(includeStats);
     }
 
     @Override

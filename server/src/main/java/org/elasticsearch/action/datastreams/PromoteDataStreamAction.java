@@ -15,6 +15,7 @@ import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.action.support.master.MasterNodeRequest;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.core.TimeValue;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -27,14 +28,15 @@ public class PromoteDataStreamAction extends ActionType<AcknowledgedResponse> {
     public static final String NAME = "indices:admin/data_stream/promote";
 
     private PromoteDataStreamAction() {
-        super(NAME, AcknowledgedResponse::readFrom);
+        super(NAME);
     }
 
     public static class Request extends MasterNodeRequest<PromoteDataStreamAction.Request> implements IndicesRequest {
 
         private final String name;
 
-        public Request(String name) {
+        public Request(TimeValue masterNodeTimeout, String name) {
+            super(masterNodeTimeout);
             this.name = Objects.requireNonNull(name);
         }
 

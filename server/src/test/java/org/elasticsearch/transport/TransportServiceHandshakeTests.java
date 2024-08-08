@@ -13,7 +13,6 @@ import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.TransportVersion;
 import org.elasticsearch.TransportVersions;
 import org.elasticsearch.Version;
-import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodeUtils;
 import org.elasticsearch.cluster.node.VersionInformation;
@@ -21,9 +20,11 @@ import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.network.NetworkService;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.PageCacheRecycler;
+import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.SuppressForbidden;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.index.IndexVersion;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.indices.breaker.NoneCircuitBreakerService;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.TransportVersionUtils;
@@ -37,16 +38,15 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
-import static java.util.Collections.emptyMap;
 import static java.util.Collections.emptySet;
 import static org.elasticsearch.transport.AbstractSimpleTransportTestCase.IGNORE_DESERIALIZATION_ERRORS_SETTING;
+import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.instanceOf;
 
@@ -84,14 +84,12 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             transport,
             threadPool,
             transportInterceptor,
-            (boundAddress) -> new DiscoveryNode(
-                nodeNameAndId,
-                nodeNameAndId,
-                boundAddress.publishAddress(),
-                emptyMap(),
-                emptySet(),
-                nodeVersion
-            ),
+            (boundAddress) -> DiscoveryNodeUtils.builder(nodeNameAndId)
+                .name(nodeNameAndId)
+                .address(boundAddress.publishAddress())
+                .roles(emptySet())
+                .version(nodeVersion)
+                .build(),
             null,
             Collections.emptySet()
         );
@@ -132,7 +130,7 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             TransportVersionUtils.randomCompatibleVersion(random()),
             new VersionInformation(
                 VersionUtils.randomVersionBetween(random(), Version.CURRENT.minimumCompatibilityVersion(), Version.CURRENT),
-                IndexVersion.MINIMUM_COMPATIBLE,
+                IndexVersions.MINIMUM_COMPATIBLE,
                 IndexVersion.current()
             ),
             TransportService.NOOP_TRANSPORT_INTERCEPTOR
@@ -140,7 +138,7 @@ public class TransportServiceHandshakeTests extends ESTestCase {
         DiscoveryNode discoveryNode = DiscoveryNodeUtils.builder("")
             .address(transportServiceB.getLocalNode().getAddress())
             .roles(emptySet())
-            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current())
+            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersions.MINIMUM_COMPATIBLE, IndexVersion.current())
             .build();
         try (
             Transport.Connection connection = AbstractSimpleTransportTestCase.openConnection(
@@ -149,7 +147,7 @@ public class TransportServiceHandshakeTests extends ESTestCase {
                 TestProfiles.LIGHT_PROFILE
             )
         ) {
-            DiscoveryNode connectedNode = PlainActionFuture.get(fut -> transportServiceA.handshake(connection, timeout, fut));
+            DiscoveryNode connectedNode = safeAwait(listener -> transportServiceA.handshake(connection, timeout, listener));
             assertNotNull(connectedNode);
             // the name and version should be updated
             assertEquals(connectedNode.getName(), "TS_B");
@@ -177,23 +175,25 @@ public class TransportServiceHandshakeTests extends ESTestCase {
         DiscoveryNode discoveryNode = DiscoveryNodeUtils.builder("")
             .address(transportServiceB.getLocalNode().getAddress())
             .roles(emptySet())
-            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current())
+            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersions.MINIMUM_COMPATIBLE, IndexVersion.current())
             .build();
-        IllegalStateException ex = expectThrows(IllegalStateException.class, () -> {
-            try (
-                Transport.Connection connection = AbstractSimpleTransportTestCase.openConnection(
-                    transportServiceA,
-                    discoveryNode,
-                    TestProfiles.LIGHT_PROFILE
+        try (
+            Transport.Connection connection = AbstractSimpleTransportTestCase.openConnection(
+                transportServiceA,
+                discoveryNode,
+                TestProfiles.LIGHT_PROFILE
+            )
+        ) {
+            assertThat(
+                asInstanceOf(
+                    IllegalStateException.class,
+                    safeAwaitFailure(DiscoveryNode.class, listener -> transportServiceA.handshake(connection, timeout, listener))
+                ).getMessage(),
+                containsString(
+                    "handshake with [" + discoveryNode + "] failed: remote cluster name [b] does not match local cluster name [a]"
                 )
-            ) {
-                PlainActionFuture.get(fut -> transportServiceA.handshake(connection, timeout, fut.map(x -> null)));
-            }
-        });
-        assertThat(
-            ex.getMessage(),
-            containsString("handshake with [" + discoveryNode + "] failed: remote cluster name [b] does not match local cluster name [a]")
-        );
+            );
+        }
         assertFalse(transportServiceA.nodeConnected(discoveryNode));
     }
 
@@ -212,7 +212,7 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             TransportVersions.MINIMUM_COMPATIBLE,
             new VersionInformation(
                 VersionUtils.getPreviousVersion(Version.CURRENT.minimumCompatibilityVersion()),
-                IndexVersion.MINIMUM_COMPATIBLE,
+                IndexVersions.MINIMUM_COMPATIBLE,
                 IndexVersion.current()
             ),
             TransportService.NOOP_TRANSPORT_INTERCEPTOR
@@ -220,31 +220,31 @@ public class TransportServiceHandshakeTests extends ESTestCase {
         DiscoveryNode discoveryNode = DiscoveryNodeUtils.builder("")
             .address(transportServiceB.getLocalNode().getAddress())
             .roles(emptySet())
-            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current())
+            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersions.MINIMUM_COMPATIBLE, IndexVersion.current())
             .build();
-        IllegalStateException ex = expectThrows(IllegalStateException.class, () -> {
-            try (
-                Transport.Connection connection = AbstractSimpleTransportTestCase.openConnection(
-                    transportServiceA,
-                    discoveryNode,
-                    TestProfiles.LIGHT_PROFILE
-                )
-            ) {
-                PlainActionFuture.get(fut -> transportServiceA.handshake(connection, timeout, fut.map(x -> null)));
-            }
-        });
-        assertThat(
-            ex.getMessage(),
-            containsString(
-                "handshake with ["
-                    + discoveryNode
-                    + "] failed: remote node version ["
-                    + transportServiceB.getLocalNode().getVersion()
-                    + "] is incompatible with local node version ["
-                    + Version.CURRENT
-                    + "]"
+        try (
+            Transport.Connection connection = AbstractSimpleTransportTestCase.openConnection(
+                transportServiceA,
+                discoveryNode,
+                TestProfiles.LIGHT_PROFILE
             )
-        );
+        ) {
+            assertThat(
+                asInstanceOf(
+                    IllegalStateException.class,
+                    safeAwaitFailure(DiscoveryNode.class, listener -> transportServiceA.handshake(connection, timeout, listener))
+                ).getMessage(),
+                containsString(
+                    "handshake with ["
+                        + discoveryNode
+                        + "] failed: remote node version ["
+                        + transportServiceB.getLocalNode().getVersion()
+                        + "] is incompatible with local node version ["
+                        + Version.CURRENT
+                        + "]"
+                )
+            );
+        }
         assertFalse(transportServiceA.nodeConnected(discoveryNode));
     }
 
@@ -261,25 +261,21 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             "TS_B",
             settings,
             TransportVersionUtils.getPreviousVersion(TransportVersions.MINIMUM_COMPATIBLE),
-            new VersionInformation(Version.CURRENT.minimumCompatibilityVersion(), IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current()),
+            new VersionInformation(Version.CURRENT.minimumCompatibilityVersion(), IndexVersions.MINIMUM_COMPATIBLE, IndexVersion.current()),
             TransportService.NOOP_TRANSPORT_INTERCEPTOR
         );
         DiscoveryNode discoveryNode = DiscoveryNodeUtils.builder("")
             .address(transportServiceB.getLocalNode().getAddress())
             .roles(emptySet())
-            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current())
+            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersions.MINIMUM_COMPATIBLE, IndexVersion.current())
             .build();
-        expectThrows(ConnectTransportException.class, () -> {
-            try (
-                Transport.Connection connection = AbstractSimpleTransportTestCase.openConnection(
-                    transportServiceA,
-                    discoveryNode,
-                    TestProfiles.LIGHT_PROFILE
-                )
-            ) {
-                PlainActionFuture.get(fut -> transportServiceA.handshake(connection, timeout, fut.map(x -> null)));
-            }
-        });
+        assertThat(
+            safeAwaitFailure(
+                Transport.Connection.class,
+                listener -> transportServiceA.openConnection(discoveryNode, TestProfiles.LIGHT_PROFILE, listener)
+            ),
+            instanceOf(ConnectTransportException.class)
+        );
         // the error is exposed as a general connection exception, the actual message is in the logs
         assertFalse(transportServiceA.nodeConnected(discoveryNode));
     }
@@ -305,11 +301,24 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             .roles(emptySet())
             .version(transportServiceB.getLocalNode().getVersionInformation())
             .build();
-        ConnectTransportException ex = expectThrows(
-            ConnectTransportException.class,
-            () -> AbstractSimpleTransportTestCase.connectToNode(transportServiceA, discoveryNode, TestProfiles.LIGHT_PROFILE)
+        assertThat(
+            asInstanceOf(
+                ConnectTransportException.class,
+                safeAwaitFailure(
+                    Releasable.class,
+                    listener -> transportServiceA.connectToNode(discoveryNode, TestProfiles.LIGHT_PROFILE, listener)
+                )
+            ).getMessage(),
+            allOf(
+                containsString("Connecting to [" + discoveryNode.getAddress() + "] failed"),
+                containsString("expected to connect to [" + discoveryNode.descriptionWithoutAttributes() + "]"),
+                containsString("found [" + transportServiceB.getLocalNode().descriptionWithoutAttributes() + "] instead"),
+                containsString("Ensure that each node has its own distinct publish address"),
+                containsString("routed to the correct node"),
+                containsString("https://www.elastic.co/guide/en/elasticsearch/reference/"),
+                containsString("modules-network.html")
+            )
         );
-        assertThat(ex.getMessage(), containsString("unexpected remote node"));
         assertFalse(transportServiceA.nodeConnected(discoveryNode));
     }
 
@@ -339,23 +348,26 @@ public class TransportServiceHandshakeTests extends ESTestCase {
         final DiscoveryNode discoveryNode = DiscoveryNodeUtils.builder("")
             .address(transportServiceB.getLocalNode().getAddress())
             .roles(emptySet())
-            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current())
+            .version(Version.CURRENT.minimumCompatibilityVersion(), IndexVersions.MINIMUM_COMPATIBLE, IndexVersion.current())
             .build();
-        TransportSerializationException ex = expectThrows(TransportSerializationException.class, () -> {
-            try (
-                Transport.Connection connection = AbstractSimpleTransportTestCase.openConnection(
-                    transportServiceA,
-                    discoveryNode,
-                    TestProfiles.LIGHT_PROFILE
-                )
-            ) {
-                PlainActionFuture.get(fut -> transportServiceA.handshake(connection, timeout, fut.map(x -> null)));
-            }
-        });
-        assertThat(
-            ExceptionsHelper.unwrap(ex, IllegalArgumentException.class).getMessage(),
-            containsString("which has an incompatible wire format")
-        );
+        try (
+            Transport.Connection connection = AbstractSimpleTransportTestCase.openConnection(
+                transportServiceA,
+                discoveryNode,
+                TestProfiles.LIGHT_PROFILE
+            )
+        ) {
+            assertThat(
+                ExceptionsHelper.unwrap(
+                    asInstanceOf(
+                        TransportSerializationException.class,
+                        safeAwaitFailure(DiscoveryNode.class, listener -> transportServiceA.handshake(connection, timeout, listener))
+                    ),
+                    IllegalArgumentException.class
+                ).getMessage(),
+                containsString("which has an incompatible wire format")
+            );
+        }
         assertFalse(transportServiceA.nodeConnected(discoveryNode));
     }
 
@@ -410,7 +422,7 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             "TS_B",
             Settings.builder().put("cluster.name", "a").build(),
             TransportVersions.MINIMUM_COMPATIBLE,
-            new VersionInformation(Version.CURRENT.minimumCompatibilityVersion(), IndexVersion.MINIMUM_COMPATIBLE, IndexVersion.current()),
+            new VersionInformation(Version.CURRENT.minimumCompatibilityVersion(), IndexVersions.MINIMUM_COMPATIBLE, IndexVersion.current()),
             transportInterceptorB
         );
         AbstractSimpleTransportTestCase.connectToNode(transportServiceA, transportServiceB.getLocalNode(), TestProfiles.LIGHT_PROFILE);
@@ -441,12 +453,7 @@ public class TransportServiceHandshakeTests extends ESTestCase {
                     }
 
                     @Override
-                    public String getChannelType() {
-                        return channel.getChannelType();
-                    }
-
-                    @Override
-                    public void sendResponse(TransportResponse response) throws IOException {
+                    public void sendResponse(TransportResponse response) {
                         assertThat(response, instanceOf(TransportService.HandshakeResponse.class));
                         if (modifyBuildHash) {
                             final TransportService.HandshakeResponse handshakeResponse = (TransportService.HandshakeResponse) response;
@@ -464,7 +471,7 @@ public class TransportServiceHandshakeTests extends ESTestCase {
                     }
 
                     @Override
-                    public void sendResponse(Exception exception) throws IOException {
+                    public void sendResponse(Exception exception) {
                         channel.sendResponse(exception);
 
                     }

@@ -8,7 +8,6 @@
 
 package org.elasticsearch.action.search;
 
-import org.elasticsearch.TransportVersion;
 import org.elasticsearch.TransportVersions;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionRequest;
@@ -24,12 +23,10 @@ import org.elasticsearch.index.mapper.SourceLoader;
 import org.elasticsearch.index.query.QueryRewriteContext;
 import org.elasticsearch.index.query.Rewriteable;
 import org.elasticsearch.search.Scroll;
-import org.elasticsearch.search.SearchService;
 import org.elasticsearch.search.builder.PointInTimeBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.search.sort.FieldSortBuilder;
-import org.elasticsearch.search.sort.ShardDocSortField;
 import org.elasticsearch.search.sort.SortBuilder;
 import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.tasks.TaskId;
@@ -265,15 +262,13 @@ public class SearchRequest extends ActionRequest implements IndicesRequest.Repla
             finalReduce = true;
         }
         ccsMinimizeRoundtrips = in.readBoolean();
-        if (in.getTransportVersion().onOrAfter(TransportVersions.V_7_12_0) && in.readBoolean()) {
+        if (in.readBoolean()) {
             minCompatibleShardNode = Version.readVersion(in);
         } else {
             minCompatibleShardNode = null;
         }
-        if (in.getTransportVersion().onOrAfter(TransportVersions.V_7_16_0)) {
-            waitForCheckpoints = in.readMap(StreamInput::readLongArray);
-            waitForCheckpointsTimeout = in.readTimeValue();
-        }
+        waitForCheckpoints = in.readMap(StreamInput::readLongArray);
+        waitForCheckpointsTimeout = in.readTimeValue();
         if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_4_0)) {
             forceSyntheticSource = in.readBoolean();
         } else {
@@ -306,26 +301,12 @@ public class SearchRequest extends ActionRequest implements IndicesRequest.Repla
             out.writeBoolean(finalReduce);
         }
         out.writeBoolean(ccsMinimizeRoundtrips);
-        if (out.getTransportVersion().onOrAfter(TransportVersions.V_7_12_0)) {
-            out.writeBoolean(minCompatibleShardNode != null);
-            if (minCompatibleShardNode != null) {
-                Version.writeVersion(minCompatibleShardNode, out);
-            }
+        out.writeBoolean(minCompatibleShardNode != null);
+        if (minCompatibleShardNode != null) {
+            Version.writeVersion(minCompatibleShardNode, out);
         }
-        TransportVersion waitForCheckpointsVersion = TransportVersions.V_7_16_0;
-        if (out.getTransportVersion().onOrAfter(waitForCheckpointsVersion)) {
-            out.writeMap(waitForCheckpoints, StreamOutput::writeLongArray);
-            out.writeTimeValue(waitForCheckpointsTimeout);
-        } else if (waitForCheckpoints.isEmpty() == false) {
-            throw new IllegalArgumentException(
-                "Remote transport version ["
-                    + out.getTransportVersion()
-                    + " incompatible with "
-                    + "wait_for_checkpoints. All nodes must use transport version ["
-                    + waitForCheckpointsVersion
-                    + "] or greater."
-            );
-        }
+        out.writeMap(waitForCheckpoints, StreamOutput::writeLongArray);
+        out.writeTimeValue(waitForCheckpointsTimeout);
         if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_4_0)) {
             out.writeBoolean(forceSyntheticSource);
         } else {
@@ -339,100 +320,34 @@ public class SearchRequest extends ActionRequest implements IndicesRequest.Repla
     public ActionRequestValidationException validate() {
         ActionRequestValidationException validationException = null;
         boolean scroll = scroll() != null;
+        boolean allowPartialSearchResults = allowPartialSearchResults() != null && allowPartialSearchResults();
+
+        if (source != null) {
+            validationException = source.validate(validationException, scroll, allowPartialSearchResults);
+        }
         if (scroll) {
-            if (source != null) {
-                if (source.trackTotalHitsUpTo() != null && source.trackTotalHitsUpTo() != SearchContext.TRACK_TOTAL_HITS_ACCURATE) {
-                    validationException = addValidationError(
-                        "disabling [track_total_hits] is not allowed in a scroll context",
-                        validationException
-                    );
-                }
-                if (source.from() > 0) {
-                    validationException = addValidationError("using [from] is not allowed in a scroll context", validationException);
-                }
-                if (source.size() == 0) {
-                    validationException = addValidationError("[size] cannot be [0] in a scroll context", validationException);
-                }
-                if (source.rescores() != null && source.rescores().isEmpty() == false) {
-                    validationException = addValidationError("using [rescore] is not allowed in a scroll context", validationException);
-                }
-            }
             if (requestCache != null && requestCache) {
                 validationException = addValidationError("[request_cache] cannot be used in a scroll context", validationException);
-            }
-        }
-        if (source != null) {
-            if (source.subSearches().size() >= 2 && source.rankBuilder() == null) {
-                validationException = addValidationError("[sub_searches] requires [rank]", validationException);
-            }
-            if (source.aggregations() != null) {
-                validationException = source.aggregations().validate(validationException);
-            }
-            if (source.rankBuilder() != null) {
-                int size = source.size() == -1 ? SearchService.DEFAULT_SIZE : source.size();
-                if (size == 0) {
-                    validationException = addValidationError("[rank] requires [size] greater than [0]", validationException);
-                }
-                if (size > source.rankBuilder().windowSize()) {
-                    validationException = addValidationError(
-                        "[rank] requires [window_size: "
-                            + source.rankBuilder().windowSize()
-                            + "]"
-                            + " be greater than or equal to [size: "
-                            + size
-                            + "]",
-                        validationException
-                    );
-                }
-                int queryCount = source.subSearches().size() + source.knnSearch().size();
-                if (queryCount < 2) {
-                    validationException = addValidationError(
-                        "[rank] requires a minimum of [2] result sets using a combination of sub searches and/or knn searches",
-                        validationException
-                    );
-                }
-                if (scroll) {
-                    validationException = addValidationError("[rank] cannot be used in a scroll context", validationException);
-                }
-                if (source.rescores() != null && source.rescores().isEmpty() == false) {
-                    validationException = addValidationError("[rank] cannot be used with [rescore]", validationException);
-                }
-                if (source.sorts() != null && source.sorts().isEmpty() == false) {
-                    validationException = addValidationError("[rank] cannot be used with [sort]", validationException);
-                }
-                if (source.collapse() != null) {
-                    validationException = addValidationError("[rank] cannot be used with [collapse]", validationException);
-                }
-                if (source.suggest() != null && source.suggest().getSuggestions().isEmpty() == false) {
-                    validationException = addValidationError("[rank] cannot be used with [suggest]", validationException);
-                }
-                if (source.highlighter() != null) {
-                    validationException = addValidationError("[rank] cannot be used with [highlighter]", validationException);
-                }
-                if (source.pointInTimeBuilder() != null) {
-                    validationException = addValidationError("[rank] cannot be used with [point in time]", validationException);
-                }
-                if (source.profile()) {
-                    validationException = addValidationError("[rank] requires [profile] is [false]", validationException);
-                }
-                if (source.explain() != null && source.explain()) {
-                    validationException = addValidationError("[rank] requires [explain] is [false]", validationException);
-                }
             }
         }
         if (pointInTimeBuilder() != null) {
             if (scroll) {
                 validationException = addValidationError("using [point in time] is not allowed in a scroll context", validationException);
             }
-        } else if (source != null && source.sorts() != null) {
-            for (SortBuilder<?> sortBuilder : source.sorts()) {
-                if (sortBuilder instanceof FieldSortBuilder
-                    && ShardDocSortField.NAME.equals(((FieldSortBuilder) sortBuilder).getFieldName())) {
-                    validationException = addValidationError(
-                        "[" + FieldSortBuilder.SHARD_DOC_FIELD_NAME + "] sort field cannot be used without [point in time]",
-                        validationException
-                    );
-                }
+            if (indices().length > 0) {
+                validationException = addValidationError(
+                    "[indices] cannot be used with point in time. Do not specify any index with point in time.",
+                    validationException
+                );
+            }
+            if (indicesOptions().equals(DEFAULT_INDICES_OPTIONS) == false) {
+                validationException = addValidationError("[indicesOptions] cannot be used with point in time", validationException);
+            }
+            if (routing() != null) {
+                validationException = addValidationError("[routing] cannot be used with point in time", validationException);
+            }
+            if (preference() != null) {
+                validationException = addValidationError("[preference] cannot be used with point in time", validationException);
             }
         }
         if (minCompatibleShardNode() != null) {
@@ -539,13 +454,6 @@ public class SearchRequest extends ActionRequest implements IndicesRequest.Repla
      */
     public void setCcsMinimizeRoundtrips(boolean ccsMinimizeRoundtrips) {
         this.ccsMinimizeRoundtrips = ccsMinimizeRoundtrips;
-    }
-
-    /**
-     * Returns the default value of {@link #ccsMinimizeRoundtrips} of a search request
-     */
-    public static boolean defaultCcsMinimizeRoundtrips(SearchRequest request) {
-        return request.minCompatibleShardNode == null;
     }
 
     /**
@@ -658,13 +566,6 @@ public class SearchRequest extends ActionRequest implements IndicesRequest.Repla
      */
     public SearchRequest scroll(TimeValue keepAlive) {
         return scroll(new Scroll(keepAlive));
-    }
-
-    /**
-     * If set, will enable scrolling of the search request for the specified timeout.
-     */
-    public SearchRequest scroll(String keepAlive) {
-        return scroll(new Scroll(TimeValue.parseTimeValue(keepAlive, null, getClass().getSimpleName() + ".Scroll.keepAlive")));
     }
 
     /**

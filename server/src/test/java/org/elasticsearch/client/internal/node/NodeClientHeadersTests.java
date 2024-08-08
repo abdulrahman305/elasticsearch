@@ -16,15 +16,14 @@ import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.TransportAction;
 import org.elasticsearch.client.internal.AbstractClientHeadersTestCase;
 import org.elasticsearch.client.internal.Client;
-import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.tasks.TaskManager;
 import org.elasticsearch.transport.Transport;
 
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 
 import static org.mockito.Mockito.mock;
 
@@ -38,14 +37,7 @@ public class NodeClientHeadersTests extends AbstractClientHeadersTestCase {
         TaskManager taskManager = new TaskManager(settings, threadPool, Collections.emptySet());
         Actions actions = new Actions(testedActions, taskManager);
         NodeClient client = new NodeClient(settings, threadPool);
-        client.initialize(
-            actions,
-            taskManager,
-            () -> "test",
-            mock(Transport.Connection.class),
-            null,
-            new NamedWriteableRegistry(List.of())
-        );
+        client.initialize(actions, taskManager, () -> "test", mock(Transport.Connection.class), null);
         return client;
     }
 
@@ -63,7 +55,7 @@ public class NodeClientHeadersTests extends AbstractClientHeadersTestCase {
     private static class InternalTransportAction extends TransportAction<ActionRequest, ActionResponse> {
 
         private InternalTransportAction(String actionName, TaskManager taskManager) {
-            super(actionName, EMPTY_FILTERS, taskManager);
+            super(actionName, EMPTY_FILTERS, taskManager, EsExecutors.DIRECT_EXECUTOR_SERVICE);
         }
 
         @Override

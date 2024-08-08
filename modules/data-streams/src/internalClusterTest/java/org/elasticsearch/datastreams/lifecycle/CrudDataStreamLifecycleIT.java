@@ -9,12 +9,13 @@
 package org.elasticsearch.datastreams.lifecycle;
 
 import org.elasticsearch.action.datastreams.CreateDataStreamAction;
+import org.elasticsearch.action.datastreams.lifecycle.GetDataStreamLifecycleAction;
+import org.elasticsearch.action.datastreams.lifecycle.PutDataStreamLifecycleAction;
+import org.elasticsearch.action.support.master.AcknowledgedRequest;
 import org.elasticsearch.cluster.metadata.DataStreamLifecycle;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.datastreams.DataStreamsPlugin;
 import org.elasticsearch.datastreams.lifecycle.action.DeleteDataStreamLifecycleAction;
-import org.elasticsearch.datastreams.lifecycle.action.GetDataStreamLifecycleAction;
-import org.elasticsearch.datastreams.lifecycle.action.PutDataStreamLifecycleAction;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.transport.MockTransportService;
@@ -36,50 +37,62 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
         return List.of(DataStreamsPlugin.class, MockTransportService.TestPlugin.class);
     }
 
-    protected boolean ignoreExternalCluster() {
-        return true;
-    }
-
     public void testGetLifecycle() throws Exception {
         DataStreamLifecycle lifecycle = randomLifecycle();
         putComposableIndexTemplate("id1", null, List.of("with-lifecycle*"), null, null, lifecycle);
-        putComposableIndexTemplate("id2", null, List.of("with-default-lifecycle*"), null, null, null);
+        putComposableIndexTemplate("id2", null, List.of("without-lifecycle*"), null, null, null);
         {
             String dataStreamName = "with-lifecycle-1";
-            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(dataStreamName);
+            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
+                dataStreamName
+            );
             client().execute(CreateDataStreamAction.INSTANCE, createDataStreamRequest).get();
         }
         {
             String dataStreamName = "with-lifecycle-2";
-            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(dataStreamName);
+            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
+                dataStreamName
+            );
             client().execute(CreateDataStreamAction.INSTANCE, createDataStreamRequest).get();
         }
         {
-            String dataStreamName = "with-default-lifecycle";
-            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(dataStreamName);
+            String dataStreamName = "without-lifecycle";
+            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
+                dataStreamName
+            );
             client().execute(CreateDataStreamAction.INSTANCE, createDataStreamRequest).get();
         }
 
         // Test retrieving all lifecycles
         {
-            GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(new String[] { "*" });
+            GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                new String[] { "*" }
+            );
             GetDataStreamLifecycleAction.Response response = client().execute(
                 GetDataStreamLifecycleAction.INSTANCE,
                 getDataLifecycleRequest
             ).get();
             assertThat(response.getDataStreamLifecycles().size(), equalTo(3));
-            assertThat(response.getDataStreamLifecycles().get(0).dataStreamName(), equalTo("with-default-lifecycle"));
-            assertThat(response.getDataStreamLifecycles().get(0).lifecycle(), equalTo(DataStreamLifecycle.DEFAULT));
-            assertThat(response.getDataStreamLifecycles().get(1).dataStreamName(), equalTo("with-lifecycle-1"));
+            assertThat(response.getDataStreamLifecycles().get(0).dataStreamName(), equalTo("with-lifecycle-1"));
+            assertThat(response.getDataStreamLifecycles().get(0).lifecycle(), equalTo(lifecycle));
+            assertThat(response.getDataStreamLifecycles().get(1).dataStreamName(), equalTo("with-lifecycle-2"));
             assertThat(response.getDataStreamLifecycles().get(1).lifecycle(), equalTo(lifecycle));
-            assertThat(response.getDataStreamLifecycles().get(2).dataStreamName(), equalTo("with-lifecycle-2"));
-            assertThat(response.getDataStreamLifecycles().get(2).lifecycle(), equalTo(lifecycle));
+            assertThat(response.getDataStreamLifecycles().get(2).dataStreamName(), equalTo("without-lifecycle"));
+            assertThat(response.getDataStreamLifecycles().get(2).lifecycle(), is(nullValue()));
             assertThat(response.getRolloverConfiguration(), nullValue());
         }
 
         // Test retrieving all lifecycles prefixed wildcard
         {
             GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "with-lifecycle*" }
             );
             GetDataStreamLifecycleAction.Response response = client().execute(
@@ -90,13 +103,14 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
             assertThat(response.getDataStreamLifecycles().get(0).dataStreamName(), equalTo("with-lifecycle-1"));
             assertThat(response.getDataStreamLifecycles().get(0).lifecycle(), equalTo(lifecycle));
             assertThat(response.getDataStreamLifecycles().get(1).dataStreamName(), equalTo("with-lifecycle-2"));
-            assertThat(response.getDataStreamLifecycles().get(1).lifecycle(), equalTo(lifecycle));
+            assertThat(response.getDataStreamLifecycles().get(1).lifecycle(), is(lifecycle));
             assertThat(response.getRolloverConfiguration(), nullValue());
         }
 
         // Test retrieving concrete data streams
         {
             GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "with-lifecycle-1", "with-lifecycle-2" }
             );
             GetDataStreamLifecycleAction.Response response = client().execute(
@@ -111,6 +125,7 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
 
         // Test include defaults
         GetDataStreamLifecycleAction.Request getDataLifecycleRequestWithDefaults = new GetDataStreamLifecycleAction.Request(
+            TEST_REQUEST_TIMEOUT,
             new String[] { "*" }
         ).includeDefaults(true);
         GetDataStreamLifecycleAction.Response responseWithRollover = client().execute(
@@ -118,12 +133,12 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
             getDataLifecycleRequestWithDefaults
         ).get();
         assertThat(responseWithRollover.getDataStreamLifecycles().size(), equalTo(3));
-        assertThat(responseWithRollover.getDataStreamLifecycles().get(0).dataStreamName(), equalTo("with-default-lifecycle"));
-        assertThat(responseWithRollover.getDataStreamLifecycles().get(0).lifecycle(), equalTo(DataStreamLifecycle.DEFAULT));
-        assertThat(responseWithRollover.getDataStreamLifecycles().get(1).dataStreamName(), equalTo("with-lifecycle-1"));
+        assertThat(responseWithRollover.getDataStreamLifecycles().get(0).dataStreamName(), equalTo("with-lifecycle-1"));
+        assertThat(responseWithRollover.getDataStreamLifecycles().get(0).lifecycle(), equalTo(lifecycle));
+        assertThat(responseWithRollover.getDataStreamLifecycles().get(1).dataStreamName(), equalTo("with-lifecycle-2"));
         assertThat(responseWithRollover.getDataStreamLifecycles().get(1).lifecycle(), equalTo(lifecycle));
-        assertThat(responseWithRollover.getDataStreamLifecycles().get(2).dataStreamName(), equalTo("with-lifecycle-2"));
-        assertThat(responseWithRollover.getDataStreamLifecycles().get(2).lifecycle(), equalTo(lifecycle));
+        assertThat(responseWithRollover.getDataStreamLifecycles().get(2).dataStreamName(), equalTo("without-lifecycle"));
+        assertThat(responseWithRollover.getDataStreamLifecycles().get(2).lifecycle(), is(nullValue()));
         assertThat(responseWithRollover.getRolloverConfiguration(), notNullValue());
     }
 
@@ -131,11 +146,16 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
         putComposableIndexTemplate("id1", null, List.of("my-data-stream*"), null, null, null);
         // Create index without a lifecycle
         String dataStreamName = "my-data-stream";
-        CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(dataStreamName);
+        CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(
+            TEST_REQUEST_TIMEOUT,
+            TEST_REQUEST_TIMEOUT,
+            dataStreamName
+        );
         client().execute(CreateDataStreamAction.INSTANCE, createDataStreamRequest).get();
 
         {
             GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "my-data-stream" }
             );
             GetDataStreamLifecycleAction.Response response = client().execute(
@@ -145,13 +165,15 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
             assertThat(response.getDataStreamLifecycles().isEmpty(), equalTo(false));
             GetDataStreamLifecycleAction.Response.DataStreamLifecycle dataStreamLifecycle = response.getDataStreamLifecycles().get(0);
             assertThat(dataStreamLifecycle.dataStreamName(), is(dataStreamName));
-            assertThat(dataStreamLifecycle.lifecycle(), equalTo(DataStreamLifecycle.DEFAULT));
+            assertThat(dataStreamLifecycle.lifecycle(), is(nullValue()));
         }
 
         // Set lifecycle
         {
             TimeValue dataRetention = randomBoolean() ? null : TimeValue.timeValueMillis(randomMillisUpToYear9999());
             PutDataStreamLifecycleAction.Request putDataLifecycleRequest = new PutDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "*" },
                 dataRetention
             );
@@ -160,6 +182,7 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
                 equalTo(true)
             );
             GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "my-data-stream" }
             );
             GetDataStreamLifecycleAction.Response response = client().execute(
@@ -168,7 +191,7 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
             ).get();
             assertThat(response.getDataStreamLifecycles().size(), equalTo(1));
             assertThat(response.getDataStreamLifecycles().get(0).dataStreamName(), equalTo("my-data-stream"));
-            assertThat(response.getDataStreamLifecycles().get(0).lifecycle().getEffectiveDataRetention(), equalTo(dataRetention));
+            assertThat(response.getDataStreamLifecycles().get(0).lifecycle().getDataStreamRetention(), equalTo(dataRetention));
             assertThat(response.getDataStreamLifecycles().get(0).lifecycle().isEnabled(), equalTo(true));
         }
 
@@ -176,6 +199,8 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
         {
             TimeValue dataRetention = randomBoolean() ? null : TimeValue.timeValueMillis(randomMillisUpToYear9999());
             PutDataStreamLifecycleAction.Request putDataLifecycleRequest = new PutDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "*" },
                 dataRetention,
                 false
@@ -185,6 +210,7 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
                 equalTo(true)
             );
             GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "my-data-stream" }
             );
             GetDataStreamLifecycleAction.Response response = client().execute(
@@ -193,7 +219,7 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
             ).get();
             assertThat(response.getDataStreamLifecycles().size(), equalTo(1));
             assertThat(response.getDataStreamLifecycles().get(0).dataStreamName(), equalTo("my-data-stream"));
-            assertThat(response.getDataStreamLifecycles().get(0).lifecycle().getEffectiveDataRetention(), equalTo(dataRetention));
+            assertThat(response.getDataStreamLifecycles().get(0).lifecycle().getDataStreamRetention(), equalTo(dataRetention));
             assertThat(response.getDataStreamLifecycles().get(0).lifecycle().isEnabled(), equalTo(false));
         }
     }
@@ -204,23 +230,36 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
         putComposableIndexTemplate("id2", null, List.of("without-lifecycle*"), null, null, null);
         {
             String dataStreamName = "with-lifecycle-1";
-            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(dataStreamName);
+            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
+                dataStreamName
+            );
             client().execute(CreateDataStreamAction.INSTANCE, createDataStreamRequest).get();
         }
         {
             String dataStreamName = "with-lifecycle-2";
-            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(dataStreamName);
+            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
+                dataStreamName
+            );
             client().execute(CreateDataStreamAction.INSTANCE, createDataStreamRequest).get();
         }
         {
             String dataStreamName = "with-lifecycle-3";
-            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(dataStreamName);
+            CreateDataStreamAction.Request createDataStreamRequest = new CreateDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
+                dataStreamName
+            );
             client().execute(CreateDataStreamAction.INSTANCE, createDataStreamRequest).get();
         }
 
         // Verify that we have 3 data streams with lifecycles
         {
             GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "with-lifecycle*" }
             );
             GetDataStreamLifecycleAction.Response response = client().execute(
@@ -233,6 +272,8 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
         // Remove lifecycle from concrete data stream
         {
             DeleteDataStreamLifecycleAction.Request deleteDataLifecycleRequest = new DeleteDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                AcknowledgedRequest.DEFAULT_ACK_TIMEOUT,
                 new String[] { "with-lifecycle-1" }
             );
             assertThat(
@@ -240,6 +281,7 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
                 equalTo(true)
             );
             GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "with-lifecycle*" }
             );
             GetDataStreamLifecycleAction.Response response = client().execute(
@@ -258,6 +300,8 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
         // Remove lifecycle from all data streams
         {
             DeleteDataStreamLifecycleAction.Request deleteDataLifecycleRequest = new DeleteDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                AcknowledgedRequest.DEFAULT_ACK_TIMEOUT,
                 new String[] { "*" }
             );
             assertThat(
@@ -265,6 +309,7 @@ public class CrudDataStreamLifecycleIT extends ESIntegTestCase {
                 equalTo(true)
             );
             GetDataStreamLifecycleAction.Request getDataLifecycleRequest = new GetDataStreamLifecycleAction.Request(
+                TEST_REQUEST_TIMEOUT,
                 new String[] { "with-lifecycle*" }
             );
             GetDataStreamLifecycleAction.Response response = client().execute(

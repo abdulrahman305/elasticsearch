@@ -8,12 +8,12 @@
 package org.elasticsearch.datastreams;
 
 import org.elasticsearch.action.DocWriteRequest;
+import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.admin.cluster.snapshots.restore.RestoreSnapshotResponse;
 import org.elasticsearch.action.admin.indices.get.GetIndexResponse;
 import org.elasticsearch.action.datastreams.CreateDataStreamAction;
 import org.elasticsearch.action.datastreams.DeleteDataStreamAction;
 import org.elasticsearch.action.datastreams.GetDataStreamAction;
-import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.cluster.metadata.ComposableIndexTemplate;
 import org.elasticsearch.index.IndexNotFoundException;
@@ -58,34 +58,46 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
         createRepository(REPO, "fs", location);
 
         {
-            CreateDataStreamAction.Request request = new CreateDataStreamAction.Request(SYSTEM_DATA_STREAM_NAME);
+            CreateDataStreamAction.Request request = new CreateDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
+                SYSTEM_DATA_STREAM_NAME
+            );
             final AcknowledgedResponse response = client().execute(CreateDataStreamAction.INSTANCE, request).get();
             assertTrue(response.isAcknowledged());
         }
 
         // Index a doc so that a concrete backing index will be created
-        IndexResponse indexRepsonse = client().prepareIndex(SYSTEM_DATA_STREAM_NAME)
-            .setId("42")
+        DocWriteResponse indexRepsonse = prepareIndex(SYSTEM_DATA_STREAM_NAME).setId("42")
             .setSource("{ \"@timestamp\": \"2099-03-08T11:06:07.000Z\", \"name\": \"my-name\" }", XContentType.JSON)
             .setOpType(DocWriteRequest.OpType.CREATE)
             .get();
         assertThat(indexRepsonse.status().getStatus(), oneOf(200, 201));
 
         {
-            GetDataStreamAction.Request request = new GetDataStreamAction.Request(new String[] { SYSTEM_DATA_STREAM_NAME });
+            GetDataStreamAction.Request request = new GetDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                new String[] { SYSTEM_DATA_STREAM_NAME }
+            );
             GetDataStreamAction.Response response = client().execute(GetDataStreamAction.INSTANCE, request).get();
             assertThat(response.getDataStreams(), hasSize(1));
             assertTrue(response.getDataStreams().get(0).getDataStream().isSystem());
         }
 
         assertSuccessful(
-            clusterAdmin().prepareCreateSnapshot(REPO, SNAPSHOT).setWaitForCompletion(true).setIncludeGlobalState(true).execute()
+            clusterAdmin().prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, REPO, SNAPSHOT)
+                .setWaitForCompletion(true)
+                .setIncludeGlobalState(true)
+                .execute()
         );
 
         // We have to delete the data stream directly, as the feature reset API doesn't clean up system data streams yet
         // See https://github.com/elastic/elasticsearch/issues/75818
         {
-            DeleteDataStreamAction.Request request = new DeleteDataStreamAction.Request(new String[] { SYSTEM_DATA_STREAM_NAME });
+            DeleteDataStreamAction.Request request = new DeleteDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                new String[] { SYSTEM_DATA_STREAM_NAME }
+            );
             AcknowledgedResponse response = client().execute(DeleteDataStreamAction.INSTANCE, request).get();
             assertTrue(response.isAcknowledged());
         }
@@ -99,7 +111,7 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
         // Make sure requesting the data stream by name throws.
         // For some reason, expectThrows() isn't working for me here, hence the try/catch.
         try {
-            clusterAdmin().prepareRestoreSnapshot(REPO, SNAPSHOT)
+            clusterAdmin().prepareRestoreSnapshot(TEST_REQUEST_TIMEOUT, REPO, SNAPSHOT)
                 .setIndices(".test-data-stream")
                 .setWaitForCompletion(true)
                 .setRestoreGlobalState(randomBoolean()) // this shouldn't matter
@@ -118,14 +130,17 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
         assertSystemDataStreamDoesNotExist();
 
         // Now actually restore the data stream
-        RestoreSnapshotResponse restoreSnapshotResponse = clusterAdmin().prepareRestoreSnapshot(REPO, SNAPSHOT)
+        RestoreSnapshotResponse restoreSnapshotResponse = clusterAdmin().prepareRestoreSnapshot(TEST_REQUEST_TIMEOUT, REPO, SNAPSHOT)
             .setWaitForCompletion(true)
             .setRestoreGlobalState(true)
             .get();
         assertEquals(restoreSnapshotResponse.getRestoreInfo().totalShards(), restoreSnapshotResponse.getRestoreInfo().successfulShards());
 
         {
-            GetDataStreamAction.Request request = new GetDataStreamAction.Request(new String[] { SYSTEM_DATA_STREAM_NAME });
+            GetDataStreamAction.Request request = new GetDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                new String[] { SYSTEM_DATA_STREAM_NAME }
+            );
             GetDataStreamAction.Response response = client().execute(GetDataStreamAction.INSTANCE, request).get();
             assertThat(response.getDataStreams(), hasSize(1));
             assertTrue(response.getDataStreams().get(0).getDataStream().isSystem());
@@ -133,13 +148,19 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
 
         // Attempting to restore again without specifying indices or global/feature states should work, as the wildcard should not be
         // resolved to system indices/data streams.
-        clusterAdmin().prepareRestoreSnapshot(REPO, SNAPSHOT).setWaitForCompletion(true).setRestoreGlobalState(false).get();
+        clusterAdmin().prepareRestoreSnapshot(TEST_REQUEST_TIMEOUT, REPO, SNAPSHOT)
+            .setWaitForCompletion(true)
+            .setRestoreGlobalState(false)
+            .get();
         assertEquals(restoreSnapshotResponse.getRestoreInfo().totalShards(), restoreSnapshotResponse.getRestoreInfo().successfulShards());
     }
 
     private void assertSystemDataStreamDoesNotExist() {
         try {
-            GetDataStreamAction.Request request = new GetDataStreamAction.Request(new String[] { SYSTEM_DATA_STREAM_NAME });
+            GetDataStreamAction.Request request = new GetDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                new String[] { SYSTEM_DATA_STREAM_NAME }
+            );
             GetDataStreamAction.Response response = client().execute(GetDataStreamAction.INSTANCE, request).get();
             assertThat(response.getDataStreams(), hasSize(0));
         } catch (Exception e) {
@@ -156,38 +177,41 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
         createRepository(REPO, "fs", location);
 
         {
-            CreateDataStreamAction.Request request = new CreateDataStreamAction.Request(SYSTEM_DATA_STREAM_NAME);
+            CreateDataStreamAction.Request request = new CreateDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                TEST_REQUEST_TIMEOUT,
+                SYSTEM_DATA_STREAM_NAME
+            );
             final AcknowledgedResponse response = client().execute(CreateDataStreamAction.INSTANCE, request).get();
             assertTrue(response.isAcknowledged());
         }
 
         // Index a doc so that a concrete backing index will be created
-        IndexResponse indexToDataStreamResponse = client().prepareIndex(SYSTEM_DATA_STREAM_NAME)
-            .setId("42")
+        DocWriteResponse indexToDataStreamResponse = prepareIndex(SYSTEM_DATA_STREAM_NAME).setId("42")
             .setSource("{ \"@timestamp\": \"2099-03-08T11:06:07.000Z\", \"name\": \"my-name\" }", XContentType.JSON)
             .setOpType(DocWriteRequest.OpType.CREATE)
-            .execute()
-            .actionGet();
+            .get();
         assertThat(indexToDataStreamResponse.status().getStatus(), oneOf(200, 201));
 
         // Index a doc so that a concrete backing index will be created
-        IndexResponse indexResponse = client().prepareIndex("my-index")
-            .setId("42")
+        DocWriteResponse indexResponse = prepareIndex("my-index").setId("42")
             .setSource("{ \"name\": \"my-name\" }", XContentType.JSON)
             .setOpType(DocWriteRequest.OpType.CREATE)
-            .execute()
             .get();
         assertThat(indexResponse.status().getStatus(), oneOf(200, 201));
 
         {
-            GetDataStreamAction.Request request = new GetDataStreamAction.Request(new String[] { SYSTEM_DATA_STREAM_NAME });
+            GetDataStreamAction.Request request = new GetDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                new String[] { SYSTEM_DATA_STREAM_NAME }
+            );
             GetDataStreamAction.Response response = client().execute(GetDataStreamAction.INSTANCE, request).get();
             assertThat(response.getDataStreams(), hasSize(1));
             assertTrue(response.getDataStreams().get(0).getDataStream().isSystem());
         }
 
         SnapshotInfo snapshotInfo = assertSuccessful(
-            clusterAdmin().prepareCreateSnapshot(REPO, SNAPSHOT)
+            clusterAdmin().prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, REPO, SNAPSHOT)
                 .setIndices("my-index")
                 .setFeatureStates(SystemDataStreamTestPlugin.class.getSimpleName())
                 .setWaitForCompletion(true)
@@ -200,7 +224,10 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
         // We have to delete the data stream directly, as the feature reset API doesn't clean up system data streams yet
         // See https://github.com/elastic/elasticsearch/issues/75818
         {
-            DeleteDataStreamAction.Request request = new DeleteDataStreamAction.Request(new String[] { SYSTEM_DATA_STREAM_NAME });
+            DeleteDataStreamAction.Request request = new DeleteDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                new String[] { SYSTEM_DATA_STREAM_NAME }
+            );
             AcknowledgedResponse response = client().execute(DeleteDataStreamAction.INSTANCE, request).get();
             assertTrue(response.isAcknowledged());
         }
@@ -212,7 +239,7 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
             assertThat(indicesRemaining.indices(), arrayWithSize(0));
         }
 
-        RestoreSnapshotResponse restoreSnapshotResponse = clusterAdmin().prepareRestoreSnapshot(REPO, SNAPSHOT)
+        RestoreSnapshotResponse restoreSnapshotResponse = clusterAdmin().prepareRestoreSnapshot(TEST_REQUEST_TIMEOUT, REPO, SNAPSHOT)
             .setWaitForCompletion(true)
             .setIndices("my-index")
             .setFeatureStates(SystemDataStreamTestPlugin.class.getSimpleName())
@@ -220,7 +247,10 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
         assertEquals(restoreSnapshotResponse.getRestoreInfo().totalShards(), restoreSnapshotResponse.getRestoreInfo().successfulShards());
 
         {
-            GetDataStreamAction.Request request = new GetDataStreamAction.Request(new String[] { SYSTEM_DATA_STREAM_NAME });
+            GetDataStreamAction.Request request = new GetDataStreamAction.Request(
+                TEST_REQUEST_TIMEOUT,
+                new String[] { SYSTEM_DATA_STREAM_NAME }
+            );
             GetDataStreamAction.Response response = client().execute(GetDataStreamAction.INSTANCE, request).get();
             assertThat(response.getDataStreams(), hasSize(1));
             assertTrue(response.getDataStreams().get(0).getDataStream().isSystem());
@@ -238,15 +268,10 @@ public class SystemDataStreamSnapshotIT extends AbstractSnapshotIntegTestCase {
                     SYSTEM_DATA_STREAM_NAME,
                     "a system data stream for testing",
                     SystemDataStreamDescriptor.Type.EXTERNAL,
-                    new ComposableIndexTemplate(
-                        List.of(".system-data-stream"),
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        new ComposableIndexTemplate.DataStreamTemplate()
-                    ),
+                    ComposableIndexTemplate.builder()
+                        .indexPatterns(List.of(".system-data-stream"))
+                        .dataStreamTemplate(new ComposableIndexTemplate.DataStreamTemplate())
+                        .build(),
                     Map.of(),
                     Collections.singletonList("test"),
                     new ExecutorNames(ThreadPool.Names.SYSTEM_CRITICAL_READ, ThreadPool.Names.SYSTEM_READ, ThreadPool.Names.SYSTEM_WRITE)

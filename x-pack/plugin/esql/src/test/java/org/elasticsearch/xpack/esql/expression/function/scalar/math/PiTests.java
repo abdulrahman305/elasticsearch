@@ -10,14 +10,12 @@ package org.elasticsearch.xpack.esql.expression.function.scalar.math;
 import com.carrotsearch.randomizedtesting.annotations.Name;
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 
-import org.elasticsearch.compute.data.Block;
-import org.elasticsearch.compute.data.DoubleBlock;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.tree.Source;
+import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.expression.function.AbstractScalarFunctionTestCase;
 import org.elasticsearch.xpack.esql.expression.function.TestCaseSupplier;
-import org.elasticsearch.xpack.esql.expression.function.scalar.AbstractScalarFunctionTestCase;
-import org.elasticsearch.xpack.ql.expression.Expression;
-import org.elasticsearch.xpack.ql.tree.Source;
-import org.elasticsearch.xpack.ql.type.DataType;
-import org.elasticsearch.xpack.ql.type.DataTypes;
+import org.hamcrest.Matcher;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -31,11 +29,11 @@ public class PiTests extends AbstractScalarFunctionTestCase {
 
     @ParametersFactory
     public static Iterable<Object[]> parameters() {
-        return parameterSuppliersFromTypedData(List.of(new TestCaseSupplier("Pi Test", () -> {
+        return parameterSuppliersFromTypedData(List.of(new TestCaseSupplier("Pi Test", List.of(DataType.INTEGER), () -> {
             return new TestCaseSupplier.TestCase(
-                List.of(new TestCaseSupplier.TypedData(1, DataTypes.INTEGER, "foo")),
-                "LiteralsEvaluator[block=3.141592653589793]",
-                DataTypes.DOUBLE,
+                List.of(new TestCaseSupplier.TypedData(1, DataType.INTEGER, "foo")),
+                "LiteralsEvaluator[lit=3.141592653589793]",
+                DataType.DOUBLE,
                 equalTo(Math.PI)
             );
         })));
@@ -47,17 +45,7 @@ public class PiTests extends AbstractScalarFunctionTestCase {
     }
 
     @Override
-    protected List<ArgumentSpec> argSpec() {
-        return List.of();
-    }
-
-    @Override
-    protected DataType expectedType(List<DataType> argTypes) {
-        return DataTypes.DOUBLE;
-    }
-
-    @Override
-    protected void assertSimpleWithNulls(List<Object> data, Block value, int nullBlock) {
-        assertThat(((DoubleBlock) value).asVector().getDouble(0), equalTo(Math.PI));
+    protected Matcher<Object> allNullsMatcher() {
+        return equalTo(Math.PI);
     }
 }
