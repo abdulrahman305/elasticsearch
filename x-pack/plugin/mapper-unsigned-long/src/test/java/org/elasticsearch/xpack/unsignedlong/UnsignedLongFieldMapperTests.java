@@ -16,11 +16,13 @@ import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.DocumentParsingException;
 import org.elasticsearch.index.mapper.MappedFieldType;
+import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.NumberTypeOutOfRangeSpec;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.TimeSeriesParams;
+import org.elasticsearch.index.mapper.TimeSeriesRoutingHashFieldMapper;
 import org.elasticsearch.index.mapper.WholeNumberFieldMapperTests;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.xcontent.XContentBuilder;
@@ -28,6 +30,7 @@ import org.junit.AssumptionViolatedException;
 
 import java.io.IOException;
 import java.math.BigInteger;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -38,8 +41,9 @@ import java.util.stream.Stream;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.matchesPattern;
 
 public class UnsignedLongFieldMapperTests extends WholeNumberFieldMapperTests {
 
@@ -260,17 +264,30 @@ public class UnsignedLongFieldMapperTests extends WholeNumberFieldMapperTests {
         }
     }
 
-    public void testDimensionMultiValuedField() throws IOException {
+    public void testDimensionMultiValuedFieldTSDB() throws IOException {
         DocumentMapper mapper = createDocumentMapper(fieldMapping(b -> {
             minimalMapping(b);
             b.field("time_series_dimension", true);
-        }));
+        }), IndexMode.TIME_SERIES);
 
-        Exception e = expectThrows(
-            DocumentParsingException.class,
-            () -> mapper.parse(source(b -> b.array("field", randomNonNegativeLong(), randomNonNegativeLong(), randomNonNegativeLong())))
-        );
-        assertThat(e.getCause().getMessage(), containsString("Dimension field [field] cannot be a multi-valued field"));
+        ParsedDocument doc = mapper.parse(source(null, b -> {
+            b.array("field", randomNonNegativeLong(), randomNonNegativeLong(), randomNonNegativeLong());
+            b.field("@timestamp", Instant.now());
+        }, TimeSeriesRoutingHashFieldMapper.encode(randomInt())));
+        assertThat(doc.docs().get(0).getFields("field"), hasSize(greaterThan(1)));
+    }
+
+    public void testDimensionMultiValuedFieldNonTSDB() throws IOException {
+        DocumentMapper mapper = createDocumentMapper(fieldMapping(b -> {
+            minimalMapping(b);
+            b.field("time_series_dimension", true);
+        }), randomFrom(IndexMode.STANDARD, IndexMode.LOGSDB));
+
+        ParsedDocument doc = mapper.parse(source(b -> {
+            b.array("field", randomNonNegativeLong(), randomNonNegativeLong(), randomNonNegativeLong());
+            b.field("@timestamp", Instant.now());
+        }));
+        assertThat(doc.docs().get(0).getFields("field"), hasSize(greaterThan(1)));
     }
 
     public void testMetricType() throws IOException {
@@ -367,6 +384,24 @@ public class UnsignedLongFieldMapperTests extends WholeNumberFieldMapperTests {
     }
 
     @Override
+    protected SyntheticSourceSupport syntheticSourceSupportForKeepTests(boolean ignoreMalformed, Mapper.SourceKeepMode sourceKeepMode) {
+        return new NumberSyntheticSourceSupport(ignoreMalformed) {
+            @Override
+            public SyntheticSourceExample example(int maxVals) {
+                var example = super.example(maxVals);
+                // Need the expectedForSyntheticSource as inputValue since MapperTestCase#testSyntheticSourceKeepArrays
+                // uses the inputValue as both the input and expected.
+                return new SyntheticSourceExample(
+                    example.expectedForSyntheticSource(),
+                    example.expectedForSyntheticSource(),
+                    example.expectedForBlockLoader(),
+                    example.mapping()
+                );
+            }
+        };
+    }
+
+    @Override
     protected IngestScriptSupport ingestScriptSupport() {
         throw new AssumptionViolatedException("not supported");
     }
@@ -415,7 +450,7 @@ public class UnsignedLongFieldMapperTests extends WholeNumberFieldMapperTests {
         };
     }
 
-    final class NumberSyntheticSourceSupport implements SyntheticSourceSupport {
+    class NumberSyntheticSourceSupport implements SyntheticSourceSupport {
         private final BigInteger nullValue = usually() ? null : BigInteger.valueOf(randomNonNegativeLong());
         private final boolean ignoreMalformedEnabled;
 
@@ -488,15 +523,7 @@ public class UnsignedLongFieldMapperTests extends WholeNumberFieldMapperTests {
 
         @Override
         public List<SyntheticSourceInvalidExample> invalidExample() {
-            return List.of(
-                new SyntheticSourceInvalidExample(
-                    matchesPattern("field \\[field] of type \\[.+] doesn't support synthetic source because it doesn't have doc values"),
-                    b -> {
-                        minimalMapping(b);
-                        b.field("doc_values", false);
-                    }
-                )
-            );
+            return List.of();
         }
     }
 }

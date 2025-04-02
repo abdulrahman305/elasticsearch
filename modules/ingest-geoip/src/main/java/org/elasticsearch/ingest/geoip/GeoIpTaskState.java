@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.ingest.geoip;
@@ -40,11 +41,10 @@ import static org.elasticsearch.persistent.PersistentTasksCustomMetadata.getTask
 import static org.elasticsearch.xcontent.ConstructingObjectParser.constructorArg;
 import static org.elasticsearch.xcontent.ConstructingObjectParser.optionalConstructorArg;
 
-class GeoIpTaskState implements PersistentTaskState, VersionedNamedWriteable {
+public class GeoIpTaskState implements PersistentTaskState, VersionedNamedWriteable {
 
     private static boolean includeSha256(TransportVersion version) {
-        return version.isPatchFrom(TransportVersions.ENTERPRISE_GEOIP_DOWNLOADER_BACKPORT_8_15)
-            || version.onOrAfter(TransportVersions.ENTERPRISE_GEOIP_DOWNLOADER);
+        return version.onOrAfter(TransportVersions.V_8_15_0);
     }
 
     private static final ParseField DATABASES = new ParseField("databases");
@@ -132,7 +132,7 @@ class GeoIpTaskState implements PersistentTaskState, VersionedNamedWriteable {
 
     @Override
     public TransportVersion getMinimalSupportedVersion() {
-        return TransportVersions.V_7_13_0;
+        return TransportVersions.ZERO;
     }
 
     @Override
@@ -149,7 +149,7 @@ class GeoIpTaskState implements PersistentTaskState, VersionedNamedWriteable {
         });
     }
 
-    record Metadata(long lastUpdate, int firstChunk, int lastChunk, String md5, long lastCheck, @Nullable String sha256)
+    public record Metadata(long lastUpdate, int firstChunk, int lastChunk, String md5, long lastCheck, @Nullable String sha256)
         implements
             ToXContentObject {
 
@@ -197,7 +197,7 @@ class GeoIpTaskState implements PersistentTaskState, VersionedNamedWriteable {
             }
         }
 
-        Metadata {
+        public Metadata {
             Objects.requireNonNull(md5);
         }
 
@@ -206,12 +206,32 @@ class GeoIpTaskState implements PersistentTaskState, VersionedNamedWriteable {
         }
 
         public boolean isCloseToExpiration() {
-            return Instant.ofEpochMilli(lastCheck).isBefore(Instant.now().minus(25, ChronoUnit.DAYS));
+            final Instant now = Instant.ofEpochMilli(System.currentTimeMillis()); // millisecond precision is sufficient (and faster)
+            return Instant.ofEpochMilli(lastCheck).isBefore(now.minus(25, ChronoUnit.DAYS));
         }
 
+        // these constants support the micro optimization below, see that note
+        private static final TimeValue THIRTY_DAYS = TimeValue.timeValueDays(30);
+        private static final long THIRTY_DAYS_MILLIS = THIRTY_DAYS.millis();
+
         public boolean isNewEnough(Settings settings) {
-            TimeValue valid = settings.getAsTime("ingest.geoip.database_validity", TimeValue.timeValueDays(30));
-            return Instant.ofEpochMilli(lastCheck).isAfter(Instant.now().minus(valid.getMillis(), ChronoUnit.MILLIS));
+            // micro optimization: this looks a little silly, but the expected case is that database_validity is only used in tests.
+            // we run this code on every document, though, so the argument checking and other bits that getAsTime does is enough
+            // to show up in a flame graph.
+
+            // if you grep for "ingest.geoip.database_validity" and you'll see that it's not a 'real' setting -- it's only defined in
+            // AbstractGeoIpIT, that's why it's an inline string constant here and no some static final, and also why it cannot
+            // be the case that this setting exists in a real running cluster
+
+            final long valid;
+            if (settings.hasValue("ingest.geoip.database_validity")) {
+                valid = settings.getAsTime("ingest.geoip.database_validity", THIRTY_DAYS).millis();
+            } else {
+                valid = THIRTY_DAYS_MILLIS;
+            }
+
+            final Instant now = Instant.ofEpochMilli(System.currentTimeMillis()); // millisecond precision is sufficient (and faster)
+            return Instant.ofEpochMilli(lastCheck).isAfter(now.minus(valid, ChronoUnit.MILLIS));
         }
 
         @Override

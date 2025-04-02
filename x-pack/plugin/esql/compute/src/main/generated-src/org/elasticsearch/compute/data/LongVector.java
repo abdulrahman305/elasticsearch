@@ -17,7 +17,7 @@ import java.io.IOException;
 
 /**
  * Vector that stores long values.
- * This class is generated. Do not edit it.
+ * This class is generated. Edit {@code X-Vector.java.st} instead.
  */
 public sealed interface LongVector extends Vector permits ConstantLongVector, LongArrayVector, LongBigArrayVector, ConstantNullVector {
 
@@ -28,6 +28,9 @@ public sealed interface LongVector extends Vector permits ConstantLongVector, Lo
 
     @Override
     LongVector filter(int... positions);
+
+    @Override
+    LongBlock keepMask(BooleanVector mask);
 
     @Override
     ReleasableIterator<? extends LongBlock> lookup(IntBlock positions, ByteSizeValue targetBlockSize);

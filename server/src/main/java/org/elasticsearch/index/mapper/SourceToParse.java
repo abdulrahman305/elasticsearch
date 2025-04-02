@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.mapper;
@@ -28,6 +29,9 @@ public class SourceToParse {
     private final XContentType xContentType;
 
     private final Map<String, String> dynamicTemplates;
+
+    private final boolean includeSourceOnError;
+
     private final XContentMeteringParserDecorator meteringParserDecorator;
 
     public SourceToParse(
@@ -36,6 +40,7 @@ public class SourceToParse {
         XContentType xContentType,
         @Nullable String routing,
         Map<String, String> dynamicTemplates,
+        boolean includeSourceOnError,
         XContentMeteringParserDecorator meteringParserDecorator
     ) {
         this.id = id;
@@ -45,15 +50,26 @@ public class SourceToParse {
         this.xContentType = Objects.requireNonNull(xContentType);
         this.routing = routing;
         this.dynamicTemplates = Objects.requireNonNull(dynamicTemplates);
+        this.includeSourceOnError = includeSourceOnError;
         this.meteringParserDecorator = meteringParserDecorator;
     }
 
     public SourceToParse(String id, BytesReference source, XContentType xContentType) {
-        this(id, source, xContentType, null, Map.of(), XContentMeteringParserDecorator.NOOP);
+        this(id, source, xContentType, null, Map.of(), true, XContentMeteringParserDecorator.NOOP);
     }
 
     public SourceToParse(String id, BytesReference source, XContentType xContentType, String routing) {
-        this(id, source, xContentType, routing, Map.of(), XContentMeteringParserDecorator.NOOP);
+        this(id, source, xContentType, routing, Map.of(), true, XContentMeteringParserDecorator.NOOP);
+    }
+
+    public SourceToParse(
+        String id,
+        BytesReference source,
+        XContentType xContentType,
+        String routing,
+        Map<String, String> dynamicTemplates
+    ) {
+        this(id, source, xContentType, routing, dynamicTemplates, true, XContentMeteringParserDecorator.NOOP);
     }
 
     public BytesReference source() {
@@ -90,7 +106,11 @@ public class SourceToParse {
         return this.xContentType;
     }
 
-    public XContentMeteringParserDecorator getDocumentSizeObserver() {
+    public XContentMeteringParserDecorator getMeteringParserDecorator() {
         return meteringParserDecorator;
+    }
+
+    public boolean getIncludeSourceOnError() {
+        return includeSourceOnError;
     }
 }

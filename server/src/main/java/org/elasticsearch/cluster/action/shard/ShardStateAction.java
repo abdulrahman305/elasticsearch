@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.action.shard;
@@ -25,6 +26,8 @@ import org.elasticsearch.cluster.NotMasterException;
 import org.elasticsearch.cluster.coordination.FailedToCommitClusterStateException;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.metadata.Metadata;
+import org.elasticsearch.cluster.metadata.ProjectId;
+import org.elasticsearch.cluster.metadata.ProjectMetadata;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.routing.IndexRoutingTable;
 import org.elasticsearch.cluster.routing.RerouteService;
@@ -36,7 +39,6 @@ import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.cluster.service.MasterServiceTaskQueue;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
@@ -46,6 +48,7 @@ import org.elasticsearch.index.Index;
 import org.elasticsearch.index.shard.IndexLongFieldRange;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.shard.ShardLongFieldRange;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.node.NodeClosedException;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -65,6 +68,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.logging.log4j.Level.DEBUG;
@@ -279,16 +283,14 @@ public class ShardStateAction {
             ClusterService clusterService,
             ShardFailedClusterStateTaskExecutor shardFailedClusterStateTaskExecutor
         ) {
-            taskQueue = clusterService.createTaskQueue(TASK_SOURCE, Priority.HIGH, shardFailedClusterStateTaskExecutor);
+            taskQueue = clusterService.createTaskQueue("shard-failed", Priority.HIGH, shardFailedClusterStateTaskExecutor);
         }
-
-        private static final String TASK_SOURCE = "shard-failed";
 
         @Override
         public void messageReceived(FailedShardEntry request, TransportChannel channel, Task task) {
             logger.debug(() -> format("%s received shard failed for [%s]", request.getShardId(), request), request.failure);
             taskQueue.submitTask(
-                TASK_SOURCE,
+                "shard-failed " + request.toStringNoFailureStackTrace(),
                 new FailedShardUpdateTask(request, new ChannelActionListener<>(channel).map(ignored -> TransportResponse.Empty.INSTANCE)),
                 null
             );
@@ -313,7 +315,8 @@ public class ShardStateAction {
             for (final var taskContext : batchExecutionContext.taskContexts()) {
                 final var task = taskContext.getTask();
                 FailedShardEntry entry = task.entry();
-                IndexMetadata indexMetadata = initialState.metadata().index(entry.getShardId().getIndex());
+                final Optional<ProjectMetadata> project = initialState.metadata().lookupProject(entry.getShardId().getIndex());
+                IndexMetadata indexMetadata = project.map(proj -> proj.index(entry.getShardId().getIndex())).orElse(null);
                 if (indexMetadata == null) {
                     // tasks that correspond to non-existent indices are marked as successful
                     logger.debug(
@@ -363,7 +366,8 @@ public class ShardStateAction {
                         }
                     }
 
-                    ShardRouting matched = initialState.getRoutingTable().getByAllocationId(entry.getShardId(), entry.getAllocationId());
+                    ShardRouting matched = initialState.routingTable(project.get().id())
+                        .getByAllocationId(entry.getShardId(), entry.getAllocationId());
                     if (matched == null) {
                         Set<String> inSyncAllocationIds = indexMetadata.inSyncAllocationIds(entry.getShardId().id());
                         // mark shard copies without routing entries that are in in-sync allocations set only as stale if the reason why
@@ -495,6 +499,14 @@ public class ShardStateAction {
 
         @Override
         public String toString() {
+            return toString(true);
+        }
+
+        public String toStringNoFailureStackTrace() {
+            return toString(false);
+        }
+
+        private String toString(boolean includeStackTrace) {
             return Strings.format(
                 "FailedShardEntry{shardId [%s], allocationId [%s], primary term [%d], message [%s], markAsStale [%b], failure [%s]}",
                 shardId,
@@ -502,7 +514,7 @@ public class ShardStateAction {
                 primaryTerm,
                 message,
                 markAsStale,
-                failure != null ? ExceptionsHelper.stackTrace(failure) : null
+                failure == null ? null : (includeStackTrace ? ExceptionsHelper.stackTrace(failure) : failure.getMessage())
             );
         }
 
@@ -622,9 +634,11 @@ public class ShardStateAction {
             final ClusterState initialState = batchExecutionContext.initialState();
             for (var taskContext : batchExecutionContext.taskContexts()) {
                 final var task = taskContext.getTask();
-                StartedShardEntry startedShardEntry = task.getEntry();
-                final ShardRouting matched = initialState.getRoutingTable()
-                    .getByAllocationId(startedShardEntry.shardId, startedShardEntry.allocationId);
+                final StartedShardEntry startedShardEntry = task.getEntry();
+                final Optional<ProjectMetadata> project = initialState.metadata().lookupProject(startedShardEntry.shardId.getIndex());
+                final ShardRouting matched = project.map(ProjectMetadata::id)
+                    .map(id -> initialState.routingTable(id).getByAllocationId(startedShardEntry.shardId, startedShardEntry.allocationId))
+                    .orElse(null);
                 if (matched == null) {
                     // tasks that correspond to non-existent shards are marked as successful. The reason is that we resend shard started
                     // events on every cluster state publishing that does not contain the shard as started yet. This means that old stale
@@ -637,8 +651,11 @@ public class ShardStateAction {
                     );
                     taskContext.success(task::onSuccess);
                 } else {
+                    final ProjectId projectId = project.get().id();
                     if (matched.primary() && startedShardEntry.primaryTerm > 0) {
-                        final IndexMetadata indexMetadata = initialState.metadata().index(startedShardEntry.shardId.getIndex());
+                        final IndexMetadata indexMetadata = initialState.metadata()
+                            .getProject(projectId)
+                            .index(startedShardEntry.shardId.getIndex());
                         assert indexMetadata != null;
                         final long currentPrimaryTerm = indexMetadata.primaryTerm(startedShardEntry.shardId.id());
                         if (currentPrimaryTerm != startedShardEntry.primaryTerm) {
@@ -701,7 +718,7 @@ public class ShardStateAction {
                                 ? null
                                 : clusterStateTimeRanges.eventIngestedRange();
 
-                            final IndexMetadata indexMetadata = initialState.metadata().index(index);
+                            final IndexMetadata indexMetadata = initialState.metadata().getProject(projectId).index(index);
                             if (currentTimestampMillisRange == null) {
                                 currentTimestampMillisRange = indexMetadata.getTimestampRange();
                             }
@@ -721,7 +738,7 @@ public class ShardStateAction {
                              */
                             IndexLongFieldRange newEventIngestedMillisRange = IndexLongFieldRange.UNKNOWN;
                             TransportVersion minTransportVersion = batchExecutionContext.initialState().getMinTransportVersion();
-                            if (minTransportVersion.onOrAfter(TransportVersions.EVENT_INGESTED_RANGE_IN_CLUSTER_STATE)) {
+                            if (minTransportVersion.onOrAfter(TransportVersions.V_8_15_0)) {
                                 newEventIngestedMillisRange = currentEventIngestedMillisRange.extendWithShardRange(
                                     startedShardEntry.shardId.id(),
                                     indexMetadata.getNumberOfShards(),
@@ -750,10 +767,13 @@ public class ShardStateAction {
                     final Metadata.Builder metadataBuilder = Metadata.builder(maybeUpdatedState.metadata());
                     for (Map.Entry<Index, ClusterStateTimeRanges> updatedTimeRangesEntry : updatedTimestampRanges.entrySet()) {
                         ClusterStateTimeRanges timeRanges = updatedTimeRangesEntry.getValue();
-                        metadataBuilder.put(
-                            IndexMetadata.builder(metadataBuilder.getSafe(updatedTimeRangesEntry.getKey()))
+                        Index index = updatedTimeRangesEntry.getKey();
+                        var projectId = maybeUpdatedState.metadata().projectFor(index).id();
+                        var projectMetadataBuilder = metadataBuilder.getProject(projectId);
+                        projectMetadataBuilder.put(
+                            IndexMetadata.builder(projectMetadataBuilder.getSafe(index))
                                 .timestampRange(timeRanges.timestampRange())
-                                .eventIngestedRange(timeRanges.eventIngestedRange(), maybeUpdatedState.getMinTransportVersion())
+                                .eventIngestedRange(timeRanges.eventIngestedRange())
                         );
                     }
                     maybeUpdatedState = ClusterState.builder(maybeUpdatedState).metadata(metadataBuilder).build();
@@ -776,24 +796,26 @@ public class ShardStateAction {
         }
 
         private static boolean assertStartedIndicesHaveCompleteTimestampRanges(ClusterState clusterState) {
-            for (Map.Entry<String, IndexRoutingTable> cursor : clusterState.getRoutingTable().getIndicesRouting().entrySet()) {
-                assert cursor.getValue().allPrimaryShardsActive() == false
-                    || clusterState.metadata().index(cursor.getKey()).getTimestampRange().isComplete()
-                    : "index ["
-                        + cursor.getKey()
-                        + "] should have complete timestamp range, but got "
-                        + clusterState.metadata().index(cursor.getKey()).getTimestampRange()
-                        + " for "
-                        + cursor.getValue().prettyPrint();
+            for (ProjectId projectId : clusterState.metadata().projects().keySet()) {
+                for (Map.Entry<String, IndexRoutingTable> cursor : clusterState.routingTable(projectId).getIndicesRouting().entrySet()) {
+                    assert cursor.getValue().allPrimaryShardsActive() == false
+                        || clusterState.metadata().getProject(projectId).index(cursor.getKey()).getTimestampRange().isComplete()
+                        : "index ["
+                            + cursor.getKey()
+                            + "] should have complete timestamp range, but got "
+                            + clusterState.metadata().getProject(projectId).index(cursor.getKey()).getTimestampRange()
+                            + " for "
+                            + cursor.getValue().prettyPrint();
 
-                assert cursor.getValue().allPrimaryShardsActive() == false
-                    || clusterState.metadata().index(cursor.getKey()).getEventIngestedRange().isComplete()
-                    : "index ["
-                        + cursor.getKey()
-                        + "] should have complete event.ingested range, but got "
-                        + clusterState.metadata().index(cursor.getKey()).getEventIngestedRange()
-                        + " for "
-                        + cursor.getValue().prettyPrint();
+                    assert cursor.getValue().allPrimaryShardsActive() == false
+                        || clusterState.metadata().getProject(projectId).index(cursor.getKey()).getEventIngestedRange().isComplete()
+                        : "index ["
+                            + cursor.getKey()
+                            + "] should have complete event.ingested range, but got "
+                            + clusterState.metadata().getProject(projectId).index(cursor.getKey()).getEventIngestedRange()
+                            + " for "
+                            + cursor.getValue().prettyPrint();
+                }
             }
             return true;
         }
@@ -826,7 +848,7 @@ public class ShardStateAction {
             primaryTerm = in.readVLong();
             this.message = in.readString();
             this.timestampRange = ShardLongFieldRange.readFrom(in);
-            if (in.getTransportVersion().onOrAfter(TransportVersions.EVENT_INGESTED_RANGE_IN_CLUSTER_STATE)) {
+            if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_15_0)) {
                 this.eventIngestedRange = ShardLongFieldRange.readFrom(in);
             } else {
                 this.eventIngestedRange = ShardLongFieldRange.UNKNOWN;
@@ -857,7 +879,7 @@ public class ShardStateAction {
             out.writeVLong(primaryTerm);
             out.writeString(message);
             timestampRange.writeTo(out);
-            if (out.getTransportVersion().onOrAfter(TransportVersions.EVENT_INGESTED_RANGE_IN_CLUSTER_STATE)) {
+            if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_15_0)) {
                 eventIngestedRange.writeTo(out);
             }
         }

@@ -18,13 +18,12 @@ import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.ClusterStateUpdateTask;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
-import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.service.ClusterService;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.SuppressForbidden;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.reservedstate.ReservedClusterStateHandler;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -55,8 +54,7 @@ public class TransportPutSnapshotLifecycleAction extends TransportMasterNodeActi
         TransportService transportService,
         ClusterService clusterService,
         ThreadPool threadPool,
-        ActionFilters actionFilters,
-        IndexNameExpressionResolver indexNameExpressionResolver
+        ActionFilters actionFilters
     ) {
         super(
             PutSnapshotLifecycleAction.NAME,
@@ -65,7 +63,6 @@ public class TransportPutSnapshotLifecycleAction extends TransportMasterNodeActi
             threadPool,
             actionFilters,
             PutSnapshotLifecycleAction.Request::new,
-            indexNameExpressionResolver,
             AcknowledgedResponse::readFrom,
             EsExecutors.DIRECT_EXECUTOR_SERVICE
         );
@@ -79,7 +76,6 @@ public class TransportPutSnapshotLifecycleAction extends TransportMasterNodeActi
         final ActionListener<AcknowledgedResponse> listener
     ) {
         SnapshotLifecycleService.validateRepositoryExists(request.getLifecycle().getRepository(), state);
-
         SnapshotLifecycleService.validateMinimumInterval(request.getLifecycle(), state);
 
         // headers from the thread context stored by the AuthenticationService to be shared between the
@@ -126,6 +122,7 @@ public class TransportPutSnapshotLifecycleAction extends TransportMasterNodeActi
         @Override
         public ClusterState execute(ClusterState currentState) {
             SnapshotLifecycleMetadata snapMeta = currentState.metadata()
+                .getProject()
                 .custom(SnapshotLifecycleMetadata.TYPE, SnapshotLifecycleMetadata.EMPTY);
             var currentMode = LifecycleOperationMetadata.currentSLMMode(currentState);
             final SnapshotLifecyclePolicyMetadata existingPolicyMetadata = snapMeta.getSnapshotConfigurations()

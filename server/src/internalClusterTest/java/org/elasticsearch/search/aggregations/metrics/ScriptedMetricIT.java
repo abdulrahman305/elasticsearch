@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.aggregations.metrics;
@@ -331,13 +332,10 @@ public class ScriptedMetricIT extends ESIntegTestCase {
             // When using the MockScriptPlugin we can map File scripts to inline scripts:
             // the name of the file script is used in test method while the source of the file script
             // must match a predefined script from CustomScriptPlugin.pluginScripts() method
-            Files.write(scripts.resolve("init_script.mockscript"), "vars.multiplier = 3".getBytes("UTF-8"));
-            Files.write(scripts.resolve("map_script.mockscript"), "state.list.add(vars.multiplier)".getBytes("UTF-8"));
-            Files.write(scripts.resolve("combine_script.mockscript"), "sum state values as a new aggregation".getBytes("UTF-8"));
-            Files.write(
-                scripts.resolve("reduce_script.mockscript"),
-                "sum all states (lists) values as a new aggregation".getBytes("UTF-8")
-            );
+            Files.writeString(scripts.resolve("init_script.mockscript"), "vars.multiplier = 3");
+            Files.writeString(scripts.resolve("map_script.mockscript"), "state.list.add(vars.multiplier)");
+            Files.writeString(scripts.resolve("combine_script.mockscript"), "sum state values as a new aggregation");
+            Files.writeString(scripts.resolve("reduce_script.mockscript"), "sum all states (lists) values as a new aggregation");
         } catch (IOException e) {
             throw new RuntimeException("failed to create scripts");
         }
@@ -357,7 +355,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
             prepareSearch("idx").setQuery(matchAllQuery())
                 .addAggregation(scriptedMetric("scripted").mapScript(mapScript).combineScript(combineScript).reduceScript(reduceScript)),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -406,7 +404,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         .reduceScript(reduceScript)
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -466,7 +464,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         )
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -521,7 +519,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                     scriptedMetric("scripted").params(params).mapScript(mapScript).combineScript(combineScript).reduceScript(reduceScript)
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -585,7 +583,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         .reduceScript(reduceScript)
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -654,7 +652,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         .reduceScript(reduceScript)
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -713,7 +711,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                     )
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Global global = response.getAggregations().get("global");
                 assertThat(global, notNullValue());
@@ -772,7 +770,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                     scriptedMetric("scripted").params(params).mapScript(mapScript).combineScript(combineScript).reduceScript(reduceScript)
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -823,7 +821,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         .reduceScript(reduceScript)
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -868,7 +866,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                     scriptedMetric("scripted").params(params).mapScript(mapScript).combineScript(combineScript).reduceScript(reduceScript)
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -927,7 +925,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         .reduceScript(reduceScript)
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -963,7 +961,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         .reduceScript(new Script(ScriptType.STORED, null, "reduceScript_stored", Collections.emptyMap()))
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
 
                 Aggregation aggregation = response.getAggregations().get("scripted");
                 assertThat(aggregation, notNullValue());
@@ -1024,7 +1022,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         )
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(numDocs));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(numDocs));
                 Aggregation aggregation = response.getAggregations().get("histo");
                 assertThat(aggregation, notNullValue());
                 assertThat(aggregation, instanceOf(Histogram.class));
@@ -1098,7 +1096,7 @@ public class ScriptedMetricIT extends ESIntegTestCase {
                         )
                 ),
             response -> {
-                assertThat(response.getHits().getTotalHits().value, equalTo(2L));
+                assertThat(response.getHits().getTotalHits().value(), equalTo(2L));
                 Histogram histo = response.getAggregations().get("histo");
                 assertThat(histo, notNullValue());
                 Bucket bucket = histo.getBuckets().get(1);

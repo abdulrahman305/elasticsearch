@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.action.shard;
@@ -318,7 +319,7 @@ public class ShardStateActionTests extends ESTestCase {
         ShardRouting failedShard = getRandomShardRouting(index);
 
         final TestListener listener = new TestListener();
-        long primaryTerm = clusterService.state().metadata().index(index).primaryTerm(failedShard.id());
+        long primaryTerm = clusterService.state().metadata().getProject().index(index).primaryTerm(failedShard.id());
         assertThat(primaryTerm, greaterThanOrEqualTo(1L));
         shardStateAction.remoteShardFailed(
             failedShard.shardId(),
@@ -483,7 +484,7 @@ public class ShardStateActionTests extends ESTestCase {
         setState(clusterService, ClusterStateCreationUtils.stateWithActivePrimary(index, true, randomInt(5)));
 
         final ShardRouting shardRouting = getRandomShardRouting(index);
-        final long primaryTerm = clusterService.state().metadata().index(shardRouting.index()).primaryTerm(shardRouting.id());
+        final long primaryTerm = clusterService.state().metadata().getProject().index(shardRouting.index()).primaryTerm(shardRouting.id());
         final TestListener listener = new TestListener();
         shardStateAction.shardStarted(
             shardRouting,
@@ -598,7 +599,7 @@ public class ShardStateActionTests extends ESTestCase {
             assertThat(deserialized.primaryTerm, equalTo(primaryTerm));
             assertThat(deserialized.message, equalTo(message));
             assertThat(deserialized.timestampRange, equalTo(timestampRange));
-            if (version.before(TransportVersions.EVENT_INGESTED_RANGE_IN_CLUSTER_STATE)) {
+            if (version.before(TransportVersions.V_8_15_0)) {
                 assertThat(deserialized.eventIngestedRange, equalTo(ShardLongFieldRange.UNKNOWN));
             } else {
                 assertThat(deserialized.eventIngestedRange, equalTo(eventIngestedRange));
@@ -611,11 +612,7 @@ public class ShardStateActionTests extends ESTestCase {
         final String allocationId = randomRealisticUnicodeOfCodepointLengthBetween(10, 100);
         final long primaryTerm = randomIntBetween(0, 100);
         final String message = randomRealisticUnicodeOfCodepointLengthBetween(10, 100);
-        final TransportVersion version = randomFrom(
-            getFirstVersion(),
-            getPreviousVersion(TransportVersions.MINIMUM_COMPATIBLE),
-            getPreviousVersion(TransportVersions.EVENT_INGESTED_RANGE_IN_CLUSTER_STATE)
-        );
+        final TransportVersion version = randomFrom(getFirstVersion(), getPreviousVersion(TransportVersions.V_8_15_0));
         final ShardLongFieldRange timestampRange = ShardLongFieldRangeWireTests.randomRange();
         final ShardLongFieldRange eventIngestedRange = ShardLongFieldRangeWireTests.randomRange();
         var startedShardEntry = new StartedShardEntry(shardId, allocationId, primaryTerm, message, timestampRange, eventIngestedRange);

@@ -1,13 +1,13 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.repositories.blobstore;
 
-import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -90,7 +90,7 @@ public abstract class ESMockAPIBasedRepositoryIntegTestCase extends ESBlobStoreR
         // the EncryptedRepository can require more than one connection open at one time
         executorService = EsExecutors.newScaling(
             ESMockAPIBasedRepositoryIntegTestCase.class.getName(),
-            0,
+            1,
             2,
             60,
             TimeUnit.SECONDS,
@@ -228,10 +228,10 @@ public abstract class ESMockAPIBasedRepositoryIntegTestCase extends ESBlobStoreR
         }).filter(Objects::nonNull).map(Repository::stats).reduce(RepositoryStats::merge).get();
 
         // Since no abort request is made, filter it out from the stats (also ensure it is 0) before comparing to the mock counts
-        Map<String, Long> sdkRequestCounts = repositoryStats.requestCounts.entrySet()
+        Map<String, Long> sdkRequestCounts = repositoryStats.actionStats.entrySet()
             .stream()
-            .filter(entry -> false == ("AbortMultipartObject".equals(entry.getKey()) && entry.getValue() == 0L))
-            .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
+            .filter(entry -> false == ("AbortMultipartObject".equals(entry.getKey()) && entry.getValue().requests() == 0L))
+            .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, e -> e.getValue().requests()));
 
         final Map<String, Long> mockCalls = getMockRequestCounts();
 
@@ -346,7 +346,7 @@ public abstract class ESMockAPIBasedRepositoryIntegTestCase extends ESBlobStoreR
     /**
      * HTTP handler that allows collect request stats per request type.
      *
-     * Implementors should keep track of the desired requests on {@link #maybeTrack(String, Headers)}.
+     * Implementors should keep track of the desired requests on {@link #maybeTrack(HttpExchange)}.
      */
     @SuppressForbidden(reason = "this test uses a HttpServer to emulate a cloud-based storage service")
     public abstract static class HttpStatsCollectorHandler implements DelegatingHttpHandler {
@@ -374,10 +374,7 @@ public abstract class ESMockAPIBasedRepositoryIntegTestCase extends ESBlobStoreR
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            final String request = exchange.getRequestMethod() + " " + exchange.getRequestURI().toString();
-
-            maybeTrack(request, exchange.getRequestHeaders());
-
+            maybeTrack(exchange);
             delegate.handle(exchange);
         }
 
@@ -387,10 +384,9 @@ public abstract class ESMockAPIBasedRepositoryIntegTestCase extends ESBlobStoreR
          * The request is represented as:
          * Request = Method SP Request-URI
          *
-         * @param request the request to be tracked if it matches the criteria
-         * @param requestHeaders the http request headers
+         * @param exchange the exchange to possibly track
          */
-        protected abstract void maybeTrack(String request, Headers requestHeaders);
+        protected abstract void maybeTrack(HttpExchange exchange);
     }
 
     /**

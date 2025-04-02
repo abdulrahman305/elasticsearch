@@ -19,6 +19,7 @@ import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.function.AbstractAggregationTestCase;
 import org.elasticsearch.xpack.esql.expression.function.MultiRowTestCaseSupplier;
 import org.elasticsearch.xpack.esql.expression.function.TestCaseSupplier;
+import org.elasticsearch.xpack.versionfield.Version;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -44,7 +45,11 @@ public class MinTests extends AbstractAggregationTestCase {
             MultiRowTestCaseSupplier.doubleCases(1, 1000, -Double.MAX_VALUE, Double.MAX_VALUE, true),
             MultiRowTestCaseSupplier.dateCases(1, 1000),
             MultiRowTestCaseSupplier.booleanCases(1, 1000),
-            MultiRowTestCaseSupplier.ipCases(1, 1000)
+            MultiRowTestCaseSupplier.ipCases(1, 1000),
+            MultiRowTestCaseSupplier.versionCases(1, 1000),
+            MultiRowTestCaseSupplier.stringCases(1, 1000, DataType.KEYWORD),
+            MultiRowTestCaseSupplier.stringCases(1, 1000, DataType.TEXT),
+            MultiRowTestCaseSupplier.stringCases(1, 1000, DataType.SEMANTIC_TEXT)
         ).flatMap(List::stream).map(MinTests::makeSupplier).collect(Collectors.toCollection(() -> suppliers));
 
         suppliers.addAll(
@@ -87,6 +92,15 @@ public class MinTests extends AbstractAggregationTestCase {
                     )
                 ),
                 new TestCaseSupplier(
+                    List.of(DataType.DATE_NANOS),
+                    () -> new TestCaseSupplier.TestCase(
+                        List.of(TestCaseSupplier.TypedData.multiRow(List.of(200L), DataType.DATE_NANOS, "field")),
+                        "Min[field=Attribute[channel=0]]",
+                        DataType.DATE_NANOS,
+                        equalTo(200L)
+                    )
+                ),
+                new TestCaseSupplier(
                     List.of(DataType.BOOLEAN),
                     () -> new TestCaseSupplier.TestCase(
                         List.of(TestCaseSupplier.TypedData.multiRow(List.of(true), DataType.BOOLEAN, "field")),
@@ -109,15 +123,41 @@ public class MinTests extends AbstractAggregationTestCase {
                         DataType.IP,
                         equalTo(new BytesRef(InetAddressPoint.encode(InetAddresses.forString("127.0.0.1"))))
                     )
-                )
+                ),
+                new TestCaseSupplier(List.of(DataType.KEYWORD), () -> {
+                    var value = new BytesRef(randomAlphaOfLengthBetween(0, 50));
+                    return new TestCaseSupplier.TestCase(
+                        List.of(TestCaseSupplier.TypedData.multiRow(List.of(value), DataType.KEYWORD, "field")),
+                        "Min[field=Attribute[channel=0]]",
+                        DataType.KEYWORD,
+                        equalTo(value)
+                    );
+                }),
+                new TestCaseSupplier(List.of(DataType.TEXT), () -> {
+                    var value = new BytesRef(randomAlphaOfLengthBetween(0, 50));
+                    return new TestCaseSupplier.TestCase(
+                        List.of(TestCaseSupplier.TypedData.multiRow(List.of(value), DataType.TEXT, "field")),
+                        "Min[field=Attribute[channel=0]]",
+                        DataType.KEYWORD,
+                        equalTo(value)
+                    );
+                }),
+                new TestCaseSupplier(List.of(DataType.VERSION), () -> {
+                    var value = randomBoolean()
+                        ? new Version(randomAlphaOfLengthBetween(1, 10)).toBytesRef()
+                        : new Version(randomIntBetween(0, 100) + "." + randomIntBetween(0, 100) + "." + randomIntBetween(0, 100))
+                            .toBytesRef();
+                    return new TestCaseSupplier.TestCase(
+                        List.of(TestCaseSupplier.TypedData.multiRow(List.of(value), DataType.VERSION, "field")),
+                        "Min[field=Attribute[channel=0]]",
+                        DataType.VERSION,
+                        equalTo(value)
+                    );
+                })
             )
         );
 
-        return parameterSuppliersFromTypedDataWithDefaultChecks(
-            suppliers,
-            false,
-            (v, p) -> "boolean, datetime, ip or numeric except unsigned_long or counter types"
-        );
+        return parameterSuppliersFromTypedDataWithDefaultChecksNoErrors(suppliers, false);
     }
 
     @Override

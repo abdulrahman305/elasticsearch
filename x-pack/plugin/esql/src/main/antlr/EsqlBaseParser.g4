@@ -1,14 +1,27 @@
-
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
  * or more contributor license agreements. Licensed under the Elastic License
  * 2.0; you may not use this file except in compliance with the Elastic License
  * 2.0.
  */
-
 parser grammar EsqlBaseParser;
 
-options {tokenVocab=EsqlBaseLexer;}
+@header {
+/*
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
+ */
+}
+
+options {
+  superClass=ParserConfig;
+  tokenVocab=EsqlBaseLexer;
+}
+
+import Expression,
+       Join;
 
 singleStatement
     : query EOF
@@ -23,75 +36,36 @@ sourceCommand
     : explainCommand
     | fromCommand
     | rowCommand
-    | metricsCommand
     | showCommand
-    | metaCommand
+    // in development
+    | {this.isDevVersion()}? metricsCommand
     ;
 
 processingCommand
     : evalCommand
-    | inlinestatsCommand
-    | limitCommand
-    | lookupCommand
-    | keepCommand
-    | sortCommand
-    | statsCommand
     | whereCommand
+    | keepCommand
+    | limitCommand
+    | statsCommand
+    | sortCommand
     | dropCommand
     | renameCommand
     | dissectCommand
     | grokCommand
     | enrichCommand
     | mvExpandCommand
-    | matchCommand
+    | joinCommand
+    // in development
+    | {this.isDevVersion()}? inlinestatsCommand
+    | {this.isDevVersion()}? lookupCommand
+    | {this.isDevVersion()}? changePointCommand
+    | {this.isDevVersion()}? insistCommand
+    | {this.isDevVersion()}? forkCommand
+    | {this.isDevVersion()}? rrfCommand
     ;
 
 whereCommand
     : WHERE booleanExpression
-    ;
-
-booleanExpression
-    : NOT booleanExpression                                                      #logicalNot
-    | valueExpression                                                            #booleanDefault
-    | regexBooleanExpression                                                     #regexExpression
-    | matchBooleanExpression                                                     #matchExpression
-    | left=booleanExpression operator=AND right=booleanExpression                #logicalBinary
-    | left=booleanExpression operator=OR right=booleanExpression                 #logicalBinary
-    | valueExpression (NOT)? IN LP valueExpression (COMMA valueExpression)* RP   #logicalIn
-    | valueExpression IS NOT? NULL                                               #isNull
-    ;
-
-regexBooleanExpression
-    : valueExpression (NOT)? kind=LIKE pattern=string
-    | valueExpression (NOT)? kind=RLIKE pattern=string
-    ;
-
-matchBooleanExpression
-    : qualifiedName MATCH_OPERATOR queryString=string
-    ;
-
-valueExpression
-    : operatorExpression                                                                      #valueExpressionDefault
-    | left=operatorExpression comparisonOperator right=operatorExpression                     #comparison
-    ;
-
-operatorExpression
-    : primaryExpression                                                                       #operatorExpressionDefault
-    | operator=(MINUS | PLUS) operatorExpression                                              #arithmeticUnary
-    | left=operatorExpression operator=(ASTERISK | SLASH | PERCENT) right=operatorExpression  #arithmeticBinary
-    | left=operatorExpression operator=(PLUS | MINUS) right=operatorExpression                #arithmeticBinary
-    ;
-
-primaryExpression
-    : constant                                                                          #constantDefault
-    | qualifiedName                                                                     #dereference
-    | functionExpression                                                                #function
-    | LP booleanExpression RP                                                           #parenthesizedExpression
-    | primaryExpression CAST_OP dataType                                                #inlineCast
-    ;
-
-functionExpression
-    : identifier LP (ASTERISK | (booleanExpression (COMMA booleanExpression)*))? RP
     ;
 
 dataType
@@ -107,21 +81,34 @@ fields
     ;
 
 field
-    : booleanExpression
-    | qualifiedName ASSIGN booleanExpression
+    : (qualifiedName ASSIGN)? booleanExpression
     ;
 
 fromCommand
-    : FROM indexPattern (COMMA indexPattern)* metadata?
+    : FROM indexPatternAndMetadataFields
+    ;
+
+metricsCommand
+    : DEV_METRICS indexPatternAndMetadataFields
+    ;
+
+indexPatternAndMetadataFields:
+    indexPattern (COMMA indexPattern)* metadata?
     ;
 
 indexPattern
-    : clusterString COLON indexString
-    | indexString
+    : (clusterString COLON)? indexString
+    | {this.isDevVersion()}? indexString (CAST_OP selectorString)?
     ;
 
 clusterString
     : UNQUOTED_SOURCE
+    | QUOTED_STRING
+    ;
+
+selectorString
+    : UNQUOTED_SOURCE
+    | QUOTED_STRING
     ;
 
 indexString
@@ -130,20 +117,7 @@ indexString
     ;
 
 metadata
-    : metadataOption
-    | deprecated_metadata
-    ;
-
-metadataOption
     : METADATA UNQUOTED_SOURCE (COMMA UNQUOTED_SOURCE)*
-    ;
-
-deprecated_metadata
-    : OPENING_BRACKET metadataOption CLOSING_BRACKET
-    ;
-
-metricsCommand
-    : METRICS indexPattern (COMMA indexPattern)* aggregates=fields? (BY grouping=fields)?
     ;
 
 evalCommand
@@ -151,16 +125,19 @@ evalCommand
     ;
 
 statsCommand
-    : STATS stats=fields? (BY grouping=fields)?
+    : STATS stats=aggFields? (BY grouping=fields)?
     ;
 
-inlinestatsCommand
-    : INLINESTATS stats=fields (BY grouping=fields)?
+aggFields
+    : aggField (COMMA aggField)*
     ;
 
+aggField
+    : field (WHERE booleanExpression)?
+    ;
 
 qualifiedName
-    : identifier (DOT identifier)*
+    : identifierOrParameter (DOT identifierOrParameter)*
     ;
 
 qualifiedNamePattern
@@ -178,24 +155,24 @@ identifier
 
 identifierPattern
     : ID_PATTERN
+    | parameter
+    | doubleParameter
     ;
 
-constant
-    : NULL                                                                              #nullLiteral
-    | integerValue UNQUOTED_IDENTIFIER                                                  #qualifiedIntegerLiteral
-    | decimalValue                                                                      #decimalLiteral
-    | integerValue                                                                      #integerLiteral
-    | booleanValue                                                                      #booleanLiteral
-    | params                                                                            #inputParams
-    | string                                                                            #stringLiteral
-    | OPENING_BRACKET numericValue (COMMA numericValue)* CLOSING_BRACKET                #numericArrayLiteral
-    | OPENING_BRACKET booleanValue (COMMA booleanValue)* CLOSING_BRACKET                #booleanArrayLiteral
-    | OPENING_BRACKET string (COMMA string)* CLOSING_BRACKET                            #stringArrayLiteral
-    ;
-
-params
+parameter
     : PARAM                        #inputParam
     | NAMED_OR_POSITIONAL_PARAM    #inputNamedOrPositionalParam
+    ;
+
+doubleParameter
+    : DOUBLE_PARAMS                        #inputDoubleParams
+    | NAMED_OR_POSITIONAL_DOUBLE_PARAMS    #inputNamedOrPositionalDoubleParams
+    ;
+
+identifierOrParameter
+    : identifier
+    | parameter
+    | doubleParameter
     ;
 
 limitCommand
@@ -246,31 +223,6 @@ commandOption
     : identifier ASSIGN constant
     ;
 
-booleanValue
-    : TRUE | FALSE
-    ;
-
-numericValue
-    : decimalValue
-    | integerValue
-    ;
-
-decimalValue
-    : (PLUS | MINUS)? DECIMAL_LITERAL
-    ;
-
-integerValue
-    : (PLUS | MINUS)? INTEGER_LITERAL
-    ;
-
-string
-    : QUOTED_STRING
-    ;
-
-comparisonOperator
-    : EQ | NEQ | LT | LTE | GT | GTE
-    ;
-
 explainCommand
     : EXPLAIN subqueryExpression
     ;
@@ -283,10 +235,6 @@ showCommand
     : SHOW INFO                                                           #showInfo
     ;
 
-metaCommand
-    : META FUNCTIONS                                                      #metaFunctions
-    ;
-
 enrichCommand
     : ENRICH policyName=ENRICH_POLICY_NAME (ON matchField=qualifiedNamePattern)? (WITH enrichWithClause (COMMA enrichWithClause)*)?
     ;
@@ -295,14 +243,48 @@ enrichWithClause
     : (newName=qualifiedNamePattern ASSIGN)? enrichField=qualifiedNamePattern
     ;
 
+//
+// In development
+//
 lookupCommand
-    : LOOKUP tableName=indexPattern ON matchFields=qualifiedNamePatterns
+    : DEV_LOOKUP tableName=indexPattern ON matchFields=qualifiedNamePatterns
     ;
 
-matchCommand
-    : MATCH matchQuery
+inlinestatsCommand
+    : DEV_INLINESTATS stats=aggFields (BY grouping=fields)?
     ;
 
-matchQuery
-    : QUOTED_STRING
+changePointCommand
+    : DEV_CHANGE_POINT value=qualifiedName (ON key=qualifiedName)? (AS targetType=qualifiedName COMMA targetPvalue=qualifiedName)?
     ;
+
+insistCommand
+    : DEV_INSIST qualifiedNamePatterns
+    ;
+
+forkCommand
+    : DEV_FORK forkSubQueries
+    ;
+
+forkSubQueries
+    : (forkSubQuery)+
+    ;
+
+forkSubQuery
+    : LP forkSubQueryCommand RP
+    ;
+
+forkSubQueryCommand
+    : forkSubQueryProcessingCommand                             #singleForkSubQueryCommand
+    | forkSubQueryCommand PIPE forkSubQueryProcessingCommand    #compositeForkSubQuery
+    ;
+
+forkSubQueryProcessingCommand
+    : whereCommand
+    | sortCommand
+    | limitCommand
+    ;
+
+rrfCommand
+   : DEV_RRF
+   ;

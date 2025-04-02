@@ -88,7 +88,7 @@ public class RuleQueryBuilder extends AbstractQueryBuilder<RuleQueryBuilder> {
         super(in);
         organicQuery = in.readNamedWriteable(QueryBuilder.class);
         matchCriteria = in.readGenericMap();
-        if (in.getTransportVersion().onOrAfter(TransportVersions.RULE_QUERY_RENAME)) {
+        if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_15_0)) {
             rulesetIds = in.readStringCollectionAsList();
         } else {
             rulesetIds = List.of(in.readString());
@@ -144,7 +144,7 @@ public class RuleQueryBuilder extends AbstractQueryBuilder<RuleQueryBuilder> {
         out.writeNamedWriteable(organicQuery);
         out.writeGenericMap(matchCriteria);
 
-        if (out.getTransportVersion().onOrAfter(TransportVersions.RULE_QUERY_RENAME)) {
+        if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_15_0)) {
             out.writeStringCollection(rulesetIds);
         } else {
             out.writeString(rulesetIds.get(0));
@@ -252,8 +252,15 @@ public class RuleQueryBuilder extends AbstractQueryBuilder<RuleQueryBuilder> {
 
                     for (MultiGetItemResponse item : multiGetResponse) {
                         String rulesetId = item.getId();
+                        // this usually happens when the system index does not exist because no query rules were created yet
+                        if (item.isFailed()) {
+                            listener.onFailure(item.getFailure().getFailure());
+                            return;
+                        }
+
                         GetResponse getResponse = item.getResponse();
 
+                        // this happens when an individual query ruleset cannot be found
                         if (getResponse.isExists() == false) {
                             listener.onFailure(new ResourceNotFoundException("query ruleset " + rulesetId + " not found"));
                             return;

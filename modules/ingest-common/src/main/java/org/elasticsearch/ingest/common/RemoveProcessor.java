@@ -1,13 +1,15 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.ingest.common;
 
+import org.elasticsearch.cluster.metadata.ProjectId;
 import org.elasticsearch.ingest.AbstractProcessor;
 import org.elasticsearch.ingest.ConfigurationUtils;
 import org.elasticsearch.ingest.IngestDocument;
@@ -57,15 +59,9 @@ public final class RemoveProcessor extends AbstractProcessor {
     }
 
     private void fieldsToRemoveProcessor(IngestDocument document) {
-        // micro-optimization note: actual for-each loops here rather than a .forEach because it happens to be ~5% faster in benchmarks
-        if (ignoreMissing) {
-            for (TemplateScript.Factory field : fieldsToRemove) {
-                removeWhenPresent(document, document.renderTemplate(field));
-            }
-        } else {
-            for (TemplateScript.Factory field : fieldsToRemove) {
-                document.removeField(document.renderTemplate(field));
-            }
+        // micro-optimization note: actual for-each loop here rather than a .forEach because it happens to be ~5% faster in benchmarks
+        for (TemplateScript.Factory field : fieldsToRemove) {
+            document.removeField(document.renderTemplate(field), ignoreMissing);
         }
     }
 
@@ -74,13 +70,7 @@ public final class RemoveProcessor extends AbstractProcessor {
             .stream()
             .filter(documentField -> IngestDocument.Metadata.isMetadata(documentField) == false)
             .filter(documentField -> shouldKeep(documentField, fieldsToKeep, document) == false)
-            .forEach(documentField -> removeWhenPresent(document, documentField));
-    }
-
-    private static void removeWhenPresent(IngestDocument document, String documentField) {
-        if (document.hasField(documentField)) {
-            document.removeField(documentField);
-        }
+            .forEach(documentField -> document.removeField(documentField, true));
     }
 
     static boolean shouldKeep(String documentField, List<TemplateScript.Factory> fieldsToKeep, IngestDocument document) {
@@ -108,7 +98,8 @@ public final class RemoveProcessor extends AbstractProcessor {
             Map<String, Processor.Factory> registry,
             String processorTag,
             String description,
-            Map<String, Object> config
+            Map<String, Object> config,
+            ProjectId projectId
         ) throws Exception {
             final List<TemplateScript.Factory> compiledTemplatesToRemove = getTemplates(processorTag, config, "field");
             final List<TemplateScript.Factory> compiledTemplatesToKeep = getTemplates(processorTag, config, "keep");

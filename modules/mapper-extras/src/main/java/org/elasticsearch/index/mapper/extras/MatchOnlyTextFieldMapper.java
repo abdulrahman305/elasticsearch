@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.mapper.extras;
@@ -20,6 +21,7 @@ import org.apache.lucene.queries.intervals.Intervals;
 import org.apache.lucene.queries.intervals.IntervalsSource;
 import org.apache.lucene.search.ConstantScoreQuery;
 import org.apache.lucene.search.FuzzyQuery;
+import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.MultiTermQuery;
 import org.apache.lucene.search.PrefixQuery;
@@ -45,7 +47,6 @@ import org.elasticsearch.index.mapper.BlockStoredFieldsReader;
 import org.elasticsearch.index.mapper.DocumentParserContext;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MapperBuilderContext;
-import org.elasticsearch.index.mapper.SourceLoader;
 import org.elasticsearch.index.mapper.SourceValueFetcher;
 import org.elasticsearch.index.mapper.StringFieldType;
 import org.elasticsearch.index.mapper.StringStoredFieldFieldLoader;
@@ -139,13 +140,11 @@ public class MatchOnlyTextFieldMapper extends FieldMapper {
         @Override
         public MatchOnlyTextFieldMapper build(MapperBuilderContext context) {
             MatchOnlyTextFieldType tft = buildFieldType(context);
-            MultiFields multiFields = multiFieldsBuilder.build(this, context);
             return new MatchOnlyTextFieldMapper(
                 leafName(),
                 Defaults.FIELD_TYPE,
                 tft,
-                multiFields,
-                copyTo,
+                builderParams(this, context),
                 context.isSourceSynthetic(),
                 this
             );
@@ -158,6 +157,7 @@ public class MatchOnlyTextFieldMapper extends FieldMapper {
 
         private final Analyzer indexAnalyzer;
         private final TextFieldType textFieldType;
+        private final String originalName;
 
         public MatchOnlyTextFieldType(
             String name,
@@ -169,6 +169,7 @@ public class MatchOnlyTextFieldMapper extends FieldMapper {
             super(name, true, false, false, tsi, meta);
             this.indexAnalyzer = Objects.requireNonNull(indexAnalyzer);
             this.textFieldType = new TextFieldType(name, isSyntheticSource);
+            this.originalName = isSyntheticSource ? name() + "._original" : null;
         }
 
         public MatchOnlyTextFieldType(String name) {
@@ -272,7 +273,11 @@ public class MatchOnlyTextFieldMapper extends FieldMapper {
 
         @Override
         public IntervalsSource prefixIntervals(BytesRef term, SearchExecutionContext context) {
-            return toIntervalsSource(Intervals.prefix(term), new PrefixQuery(new Term(name(), term)), context);
+            return toIntervalsSource(
+                Intervals.prefix(term, IndexSearcher.getMaxClauseCount()),
+                new PrefixQuery(new Term(name(), term)),
+                context
+            );
         }
 
         @Override
@@ -287,19 +292,43 @@ public class MatchOnlyTextFieldMapper extends FieldMapper {
                 new Term(name(), term),
                 maxDistance,
                 prefixLength,
-                128,
+                IndexSearcher.getMaxClauseCount(),
                 transpositions,
                 MultiTermQuery.CONSTANT_SCORE_BLENDED_REWRITE
             );
-            IntervalsSource fuzzyIntervals = Intervals.multiterm(fuzzyQuery.getAutomata(), term);
+            IntervalsSource fuzzyIntervals = Intervals.multiterm(fuzzyQuery.getAutomata(), IndexSearcher.getMaxClauseCount(), term);
             return toIntervalsSource(fuzzyIntervals, fuzzyQuery, context);
         }
 
         @Override
         public IntervalsSource wildcardIntervals(BytesRef pattern, SearchExecutionContext context) {
             return toIntervalsSource(
-                Intervals.wildcard(pattern),
+                Intervals.wildcard(pattern, IndexSearcher.getMaxClauseCount()),
                 new MatchAllDocsQuery(), // wildcard queries can be expensive, what should the approximation be?
+                context
+            );
+        }
+
+        @Override
+        public IntervalsSource regexpIntervals(BytesRef pattern, SearchExecutionContext context) {
+            return toIntervalsSource(
+                Intervals.regexp(pattern, IndexSearcher.getMaxClauseCount()),
+                new MatchAllDocsQuery(), // regexp queries can be expensive, what should the approximation be?
+                context
+            );
+        }
+
+        @Override
+        public IntervalsSource rangeIntervals(
+            BytesRef lowerTerm,
+            BytesRef upperTerm,
+            boolean includeLower,
+            boolean includeUpper,
+            SearchExecutionContext context
+        ) {
+            return toIntervalsSource(
+                Intervals.range(lowerTerm, upperTerm, includeLower, includeUpper, IndexSearcher.getMaxClauseCount()),
+                new MatchAllDocsQuery(), // range queries can be expensive, what should the approximation be?
                 context
             );
         }
@@ -367,7 +396,7 @@ public class MatchOnlyTextFieldMapper extends FieldMapper {
         }
 
         private String storedFieldNameForSyntheticSource() {
-            return name() + "._original";
+            return originalName;
         }
     }
 
@@ -382,12 +411,11 @@ public class MatchOnlyTextFieldMapper extends FieldMapper {
         String simpleName,
         FieldType fieldType,
         MatchOnlyTextFieldType mappedFieldType,
-        MultiFields multiFields,
-        CopyTo copyTo,
+        BuilderParams builderParams,
         boolean storeSource,
         Builder builder
     ) {
-        super(simpleName, mappedFieldType, multiFields, copyTo, false, null);
+        super(simpleName, mappedFieldType, builderParams);
         assert mappedFieldType.getTextSearchInfo().isTokenized();
         assert mappedFieldType.hasDocValues() == false;
         this.fieldType = freezeAndDeduplicateFieldType(fieldType);
@@ -436,22 +464,14 @@ public class MatchOnlyTextFieldMapper extends FieldMapper {
     }
 
     @Override
-    protected SyntheticSourceMode syntheticSourceMode() {
-        return SyntheticSourceMode.NATIVE;
-    }
-
-    @Override
-    public SourceLoader.SyntheticFieldLoader syntheticFieldLoader() {
-        if (copyTo.copyToFields().isEmpty() != true) {
-            throw new IllegalArgumentException(
-                "field [" + fullPath() + "] of type [" + typeName() + "] doesn't support synthetic source because it declares copy_to"
-            );
-        }
-        return new StringStoredFieldFieldLoader(fieldType().storedFieldNameForSyntheticSource(), leafName(), null) {
-            @Override
-            protected void write(XContentBuilder b, Object value) throws IOException {
-                b.value((String) value);
+    protected SyntheticSourceSupport syntheticSourceSupport() {
+        return new SyntheticSourceSupport.Native(
+            () -> new StringStoredFieldFieldLoader(fieldType().storedFieldNameForSyntheticSource(), fieldType().name(), leafName()) {
+                @Override
+                protected void write(XContentBuilder b, Object value) throws IOException {
+                    b.value((String) value);
+                }
             }
-        };
+        );
     }
 }

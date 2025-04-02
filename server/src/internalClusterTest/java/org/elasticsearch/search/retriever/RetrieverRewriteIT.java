@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.retriever;
@@ -21,6 +22,7 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodeRole;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.QueryRewriteContext;
 import org.elasticsearch.plugins.Plugin;
@@ -76,8 +78,8 @@ public class RetrieverRewriteIT extends ESIntegTestCase {
         ElasticsearchAssertions.assertResponse(req, resp -> {
             assertNull(resp.pointInTimeId());
             assertNotNull(resp.getHits().getTotalHits());
-            assertThat(resp.getHits().getTotalHits().value, equalTo(1L));
-            assertThat(resp.getHits().getTotalHits().relation, equalTo(TotalHits.Relation.EQUAL_TO));
+            assertThat(resp.getHits().getTotalHits().value(), equalTo(1L));
+            assertThat(resp.getHits().getTotalHits().relation(), equalTo(TotalHits.Relation.EQUAL_TO));
             assertThat(resp.getHits().getAt(0).getId(), equalTo("doc_0"));
         });
     }
@@ -89,8 +91,8 @@ public class RetrieverRewriteIT extends ESIntegTestCase {
         ElasticsearchAssertions.assertResponse(req, resp -> {
             assertNull(resp.pointInTimeId());
             assertNotNull(resp.getHits().getTotalHits());
-            assertThat(resp.getHits().getTotalHits().value, equalTo(1L));
-            assertThat(resp.getHits().getTotalHits().relation, equalTo(TotalHits.Relation.EQUAL_TO));
+            assertThat(resp.getHits().getTotalHits().value(), equalTo(1L));
+            assertThat(resp.getHits().getTotalHits().relation(), equalTo(TotalHits.Relation.EQUAL_TO));
             assertThat(resp.getHits().getAt(0).getId(), equalTo("doc_2"));
         });
     }
@@ -114,7 +116,7 @@ public class RetrieverRewriteIT extends ESIntegTestCase {
                 throw new IllegalStateException("node did not stop");
             }
             assertBusy(() -> {
-                ClusterHealthResponse healthResponse = clusterAdmin().prepareHealth(testIndex)
+                ClusterHealthResponse healthResponse = clusterAdmin().prepareHealth(TEST_REQUEST_TIMEOUT, testIndex)
                     .setWaitForStatus(ClusterHealthStatus.RED) // we are now known red because the primary shard is missing
                     .setWaitForEvents(Priority.LANGUID) // ensures that the update has occurred
                     .execute()
@@ -125,10 +127,7 @@ public class RetrieverRewriteIT extends ESIntegTestCase {
                 SearchPhaseExecutionException.class,
                 client().prepareSearch(testIndex).setSource(source)::get
             );
-            assertThat(
-                ex.getDetailedMessage(),
-                containsString("[open_point_in_time] action requires all shards to be available. Missing shards")
-            );
+            assertThat(ex.getDetailedMessage(), containsString("Search rejected due to missing shards"));
         } finally {
             internalCluster().restartNode(randomDataNode);
         }
@@ -139,6 +138,11 @@ public class RetrieverRewriteIT extends ESIntegTestCase {
 
         private AssertingRetrieverBuilder(RetrieverBuilder innerRetriever) {
             this.innerRetriever = innerRetriever;
+        }
+
+        @Override
+        public QueryBuilder topDocsQuery() {
+            return null;
         }
 
         @Override
@@ -198,6 +202,11 @@ public class RetrieverRewriteIT extends ESIntegTestCase {
         @Override
         public boolean isCompound() {
             return true;
+        }
+
+        @Override
+        public QueryBuilder topDocsQuery() {
+            return null;
         }
 
         @Override

@@ -68,21 +68,21 @@ public class SnapshotLifecycleTask implements SchedulerEngine.Listener {
 
     @Override
     public void triggered(SchedulerEngine.Event event) {
-        logger.debug("snapshot lifecycle policy task triggered from job [{}]", event.getJobName());
+        logger.debug("snapshot lifecycle policy task triggered from job [{}]", event.jobName());
 
-        final Optional<String> snapshotName = maybeTakeSnapshot(event.getJobName(), client, clusterService, historyStore);
+        final Optional<String> snapshotName = maybeTakeSnapshot(event.jobName(), client, clusterService, historyStore);
 
         // Would be cleaner if we could use Optional#ifPresentOrElse
         snapshotName.ifPresent(
             name -> logger.info(
                 "snapshot lifecycle policy job [{}] issued new snapshot creation for [{}] successfully",
-                event.getJobName(),
+                event.jobName(),
                 name
             )
         );
 
         if (snapshotName.isPresent() == false) {
-            logger.warn("snapshot lifecycle policy for job [{}] no longer exists, snapshot not created", event.getJobName());
+            logger.warn("snapshot lifecycle policy for job [{}] no longer exists, snapshot not created", event.jobName());
         }
     }
 
@@ -199,7 +199,7 @@ public class SnapshotLifecycleTask implements SchedulerEngine.Listener {
      * For the given job id, return an optional policy metadata object, if one exists
      */
     static Optional<SnapshotLifecyclePolicyMetadata> getSnapPolicyMetadata(final String jobId, final ClusterState state) {
-        return Optional.ofNullable((SnapshotLifecycleMetadata) state.metadata().custom(SnapshotLifecycleMetadata.TYPE))
+        return Optional.ofNullable((SnapshotLifecycleMetadata) state.metadata().getProject().custom(SnapshotLifecycleMetadata.TYPE))
             .map(SnapshotLifecycleMetadata::getSnapshotConfigurations)
             .flatMap(
                 configMap -> configMap.values()
@@ -272,8 +272,10 @@ public class SnapshotLifecycleTask implements SchedulerEngine.Listener {
         @Override
         public ClusterState execute(ClusterState currentState) throws Exception {
             SnapshotLifecycleMetadata snapMeta = currentState.metadata()
+                .getProject()
                 .custom(SnapshotLifecycleMetadata.TYPE, SnapshotLifecycleMetadata.EMPTY);
             RegisteredPolicySnapshots registeredSnapshots = currentState.metadata()
+                .getProject()
                 .custom(RegisteredPolicySnapshots.TYPE, RegisteredPolicySnapshots.EMPTY);
 
             Map<String, SnapshotLifecyclePolicyMetadata> snapLifecycles = new HashMap<>(snapMeta.getSnapshotConfigurations());

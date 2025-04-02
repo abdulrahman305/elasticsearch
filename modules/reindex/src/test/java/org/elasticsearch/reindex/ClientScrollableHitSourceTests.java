@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.reindex;
@@ -13,7 +14,6 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.ActionType;
-import org.elasticsearch.action.bulk.BackoffPolicy;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchScrollRequest;
@@ -21,6 +21,7 @@ import org.elasticsearch.action.search.TransportSearchAction;
 import org.elasticsearch.action.search.TransportSearchScrollAction;
 import org.elasticsearch.client.internal.ParentTaskAssigningClient;
 import org.elasticsearch.client.internal.support.AbstractClient;
+import org.elasticsearch.common.BackoffPolicy;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.EsRejectedExecutionException;
@@ -29,6 +30,7 @@ import org.elasticsearch.index.reindex.ClientScrollableHitSource;
 import org.elasticsearch.index.reindex.ScrollableHitSource;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
+import org.elasticsearch.search.SearchResponseUtils;
 import org.elasticsearch.tasks.TaskId;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.threadpool.TestThreadPool;
@@ -154,10 +156,7 @@ public class ClientScrollableHitSourceTests extends ESTestCase {
         );
 
         hitSource.startNextScroll(timeValueSeconds(100));
-        client.validateRequest(
-            TransportSearchScrollAction.TYPE,
-            (SearchScrollRequest r) -> assertEquals(r.scroll().keepAlive().seconds(), 110)
-        );
+        client.validateRequest(TransportSearchScrollAction.TYPE, (SearchScrollRequest r) -> assertEquals(r.scroll().seconds(), 110));
     }
 
     private SearchResponse createSearchResponse() {
@@ -168,22 +167,7 @@ public class ClientScrollableHitSourceTests extends ESTestCase {
             new TotalHits(0, TotalHits.Relation.EQUAL_TO),
             0
         );
-        return new SearchResponse(
-            hits,
-            null,
-            null,
-            false,
-            false,
-            null,
-            1,
-            randomSimpleString(random(), 1, 10),
-            5,
-            4,
-            0,
-            randomLong(),
-            null,
-            SearchResponse.Clusters.EMPTY
-        );
+        return SearchResponseUtils.response(hits).scrollId(randomSimpleString(random(), 1, 10)).shards(5, 4, 0).build();
     }
 
     private void assertSameHits(List<? extends ScrollableHitSource.Hit> actual, SearchHit[] expected) {

@@ -1,19 +1,22 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action;
 
 import org.elasticsearch.action.admin.cluster.node.info.TransportNodesInfoAction;
+import org.elasticsearch.action.bulk.IncrementalBulkService;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.TransportAction;
 import org.elasticsearch.client.internal.node.NodeClient;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
+import org.elasticsearch.cluster.project.TestProjectResolvers;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.ClusterSettings;
@@ -128,7 +131,10 @@ public class ActionModuleTests extends ESTestCase {
             mock(ClusterService.class),
             null,
             List.of(),
-            RestExtension.allowAll()
+            List.of(),
+            RestExtension.allowAll(),
+            new IncrementalBulkService(null, null),
+            TestProjectResolvers.alwaysThrow()
         );
         actionModule.initRestHandlers(null, null);
         // At this point the easiest way to confirm that a handler is loaded is to try to register another one on top of it and to fail
@@ -192,7 +198,10 @@ public class ActionModuleTests extends ESTestCase {
                 mock(ClusterService.class),
                 null,
                 List.of(),
-                RestExtension.allowAll()
+                List.of(),
+                RestExtension.allowAll(),
+                new IncrementalBulkService(null, null),
+                TestProjectResolvers.alwaysThrow()
             );
             Exception e = expectThrows(IllegalArgumentException.class, () -> actionModule.initRestHandlers(null, null));
             assertThat(e.getMessage(), startsWith("Cannot replace existing handler for [/_nodes] for method: GET"));
@@ -249,7 +258,10 @@ public class ActionModuleTests extends ESTestCase {
                 mock(ClusterService.class),
                 null,
                 List.of(),
-                RestExtension.allowAll()
+                List.of(),
+                RestExtension.allowAll(),
+                new IncrementalBulkService(null, null),
+                TestProjectResolvers.alwaysThrow()
             );
             actionModule.initRestHandlers(null, null);
             // At this point the easiest way to confirm that a handler is loaded is to try to register another one on top of it and to fail
@@ -299,7 +311,10 @@ public class ActionModuleTests extends ESTestCase {
                     mock(ClusterService.class),
                     null,
                     List.of(),
-                    RestExtension.allowAll()
+                    List.of(),
+                    RestExtension.allowAll(),
+                    new IncrementalBulkService(null, null),
+                    TestProjectResolvers.alwaysThrow()
                 )
             );
             assertThat(
@@ -340,7 +355,10 @@ public class ActionModuleTests extends ESTestCase {
                     mock(ClusterService.class),
                     null,
                     List.of(),
-                    RestExtension.allowAll()
+                    List.of(),
+                    RestExtension.allowAll(),
+                    new IncrementalBulkService(null, null),
+                    TestProjectResolvers.alwaysThrow()
                 )
             );
             assertThat(

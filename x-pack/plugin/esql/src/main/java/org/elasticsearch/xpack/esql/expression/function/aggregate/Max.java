@@ -11,12 +11,15 @@ import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.compute.aggregation.AggregatorFunctionSupplier;
 import org.elasticsearch.compute.aggregation.MaxBooleanAggregatorFunctionSupplier;
+import org.elasticsearch.compute.aggregation.MaxBytesRefAggregatorFunctionSupplier;
 import org.elasticsearch.compute.aggregation.MaxDoubleAggregatorFunctionSupplier;
 import org.elasticsearch.compute.aggregation.MaxIntAggregatorFunctionSupplier;
 import org.elasticsearch.compute.aggregation.MaxIpAggregatorFunctionSupplier;
 import org.elasticsearch.compute.aggregation.MaxLongAggregatorFunctionSupplier;
+import org.elasticsearch.compute.data.AggregateMetricDoubleBlockBuilder;
 import org.elasticsearch.xpack.esql.EsqlIllegalArgumentException;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.TypeResolutions;
 import org.elasticsearch.xpack.esql.core.tree.NodeInfo;
 import org.elasticsearch.xpack.esql.core.tree.Source;
@@ -24,22 +27,41 @@ import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.SurrogateExpression;
 import org.elasticsearch.xpack.esql.expression.function.Example;
 import org.elasticsearch.xpack.esql.expression.function.FunctionInfo;
+import org.elasticsearch.xpack.esql.expression.function.FunctionType;
 import org.elasticsearch.xpack.esql.expression.function.Param;
+import org.elasticsearch.xpack.esql.expression.function.scalar.convert.FromAggregateMetricDouble;
 import org.elasticsearch.xpack.esql.expression.function.scalar.multivalue.MvMax;
 import org.elasticsearch.xpack.esql.planner.ToAggregator;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
 
+import static java.util.Collections.emptyList;
 import static org.elasticsearch.xpack.esql.core.expression.TypeResolutions.ParamOrdinal.DEFAULT;
 
 public class Max extends AggregateFunction implements ToAggregator, SurrogateExpression {
     public static final NamedWriteableRegistry.Entry ENTRY = new NamedWriteableRegistry.Entry(Expression.class, "Max", Max::new);
 
+    private static final Map<DataType, Supplier<AggregatorFunctionSupplier>> SUPPLIERS = Map.ofEntries(
+        Map.entry(DataType.BOOLEAN, MaxBooleanAggregatorFunctionSupplier::new),
+        Map.entry(DataType.LONG, MaxLongAggregatorFunctionSupplier::new),
+        Map.entry(DataType.DATETIME, MaxLongAggregatorFunctionSupplier::new),
+        Map.entry(DataType.DATE_NANOS, MaxLongAggregatorFunctionSupplier::new),
+        Map.entry(DataType.INTEGER, MaxIntAggregatorFunctionSupplier::new),
+        Map.entry(DataType.DOUBLE, MaxDoubleAggregatorFunctionSupplier::new),
+        Map.entry(DataType.IP, MaxIpAggregatorFunctionSupplier::new),
+        Map.entry(DataType.KEYWORD, MaxBytesRefAggregatorFunctionSupplier::new),
+        Map.entry(DataType.TEXT, MaxBytesRefAggregatorFunctionSupplier::new),
+        Map.entry(DataType.SEMANTIC_TEXT, MaxBytesRefAggregatorFunctionSupplier::new),
+        Map.entry(DataType.VERSION, MaxBytesRefAggregatorFunctionSupplier::new)
+    );
+
     @FunctionInfo(
-        returnType = { "boolean", "double", "integer", "long", "date", "ip" },
+        returnType = { "boolean", "double", "integer", "long", "date", "date_nanos", "ip", "keyword", "long", "version" },
         description = "The maximum value of a field.",
-        isAggregation = true,
+        type = FunctionType.AGGREGATE,
         examples = {
             @Example(file = "stats", tag = "max"),
             @Example(
@@ -50,8 +72,30 @@ public class Max extends AggregateFunction implements ToAggregator, SurrogateExp
                 tag = "docsStatsMaxNestedExpression"
             ) }
     )
-    public Max(Source source, @Param(name = "field", type = { "boolean", "double", "integer", "long", "date", "ip" }) Expression field) {
-        super(source, field);
+    public Max(
+        Source source,
+        @Param(
+            name = "field",
+            type = {
+                "aggregate_metric_double",
+                "boolean",
+                "double",
+                "integer",
+                "long",
+                "date",
+                "date_nanos",
+                "ip",
+                "keyword",
+                "text",
+                "long",
+                "version" }
+        ) Expression field
+    ) {
+        this(source, field, Literal.TRUE);
+    }
+
+    public Max(Source source, Expression field, Expression filter) {
+        super(source, field, filter, emptyList());
     }
 
     private Max(StreamInput in) throws IOException {
@@ -64,57 +108,54 @@ public class Max extends AggregateFunction implements ToAggregator, SurrogateExp
     }
 
     @Override
+    public Max withFilter(Expression filter) {
+        return new Max(source(), field(), filter);
+    }
+
+    @Override
     protected NodeInfo<Max> info() {
-        return NodeInfo.create(this, Max::new, field());
+        return NodeInfo.create(this, Max::new, field(), filter());
     }
 
     @Override
     public Max replaceChildren(List<Expression> newChildren) {
-        return new Max(source(), newChildren.get(0));
+        return new Max(source(), newChildren.get(0), newChildren.get(1));
     }
 
     @Override
     protected TypeResolution resolveType() {
         return TypeResolutions.isType(
             field(),
-            e -> e == DataType.BOOLEAN || e == DataType.DATETIME || e == DataType.IP || (e.isNumeric() && e != DataType.UNSIGNED_LONG),
+            dt -> SUPPLIERS.containsKey(dt) || dt == DataType.AGGREGATE_METRIC_DOUBLE,
             sourceText(),
             DEFAULT,
-            "boolean",
-            "datetime",
-            "ip",
-            "numeric except unsigned_long or counter types"
+            "representable except unsigned_long and spatial types"
         );
     }
 
     @Override
     public DataType dataType() {
-        return field().dataType();
+        if (field().dataType() == DataType.AGGREGATE_METRIC_DOUBLE) {
+            return DataType.DOUBLE;
+        }
+        return field().dataType().noText();
     }
 
     @Override
-    public final AggregatorFunctionSupplier supplier(List<Integer> inputChannels) {
+    public final AggregatorFunctionSupplier supplier() {
         DataType type = field().dataType();
-        if (type == DataType.BOOLEAN) {
-            return new MaxBooleanAggregatorFunctionSupplier(inputChannels);
+        if (SUPPLIERS.containsKey(type) == false) {
+            // If the type checking did its job, this should never happen
+            throw EsqlIllegalArgumentException.illegalDataType(type);
         }
-        if (type == DataType.LONG || type == DataType.DATETIME) {
-            return new MaxLongAggregatorFunctionSupplier(inputChannels);
-        }
-        if (type == DataType.INTEGER) {
-            return new MaxIntAggregatorFunctionSupplier(inputChannels);
-        }
-        if (type == DataType.DOUBLE) {
-            return new MaxDoubleAggregatorFunctionSupplier(inputChannels);
-        }
-        if (type == DataType.IP) {
-            return new MaxIpAggregatorFunctionSupplier(inputChannels);
-        }
-        throw EsqlIllegalArgumentException.illegalDataType(type);
+        return SUPPLIERS.get(type).get();
     }
 
     @Override
     public Expression surrogate() {
+        if (field().dataType() == DataType.AGGREGATE_METRIC_DOUBLE) {
+            return new Max(source(), FromAggregateMetricDouble.withMetric(source(), field(), AggregateMetricDoubleBlockBuilder.Metric.MAX));
+        }
         return field().foldable() ? new MvMax(source(), field()) : null;
     }
 }

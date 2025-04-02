@@ -1,16 +1,19 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.logsdb.datageneration.datasource;
 
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.test.geo.RandomGeoGenerator;
 
 import java.math.BigInteger;
+import java.time.Instant;
 
 public class DefaultPrimitiveTypesHandler implements DataSourceHandler {
     @Override
@@ -44,13 +47,6 @@ public class DefaultPrimitiveTypesHandler implements DataSourceHandler {
     }
 
     @Override
-    public DataSourceResponse.DoubleInRangeGenerator handle(DataSourceRequest.DoubleInRangeGenerator request) {
-        return new DataSourceResponse.DoubleInRangeGenerator(
-            () -> ESTestCase.randomDoubleBetween(request.minExclusive(), request.maxExclusive(), false)
-        );
-    }
-
-    @Override
     public DataSourceResponse.FloatGenerator handle(DataSourceRequest.FloatGenerator request) {
         return new DataSourceResponse.FloatGenerator(ESTestCase::randomFloat);
     }
@@ -64,5 +60,22 @@ public class DefaultPrimitiveTypesHandler implements DataSourceHandler {
     @Override
     public DataSourceResponse.StringGenerator handle(DataSourceRequest.StringGenerator request) {
         return new DataSourceResponse.StringGenerator(() -> ESTestCase.randomAlphaOfLengthBetween(0, 50));
+    }
+
+    @Override
+    public DataSourceResponse.BooleanGenerator handle(DataSourceRequest.BooleanGenerator request) {
+        return new DataSourceResponse.BooleanGenerator(ESTestCase::randomBoolean);
+    }
+
+    private static final Instant MAX_INSTANT = Instant.parse("2200-01-01T00:00:00Z");
+
+    @Override
+    public DataSourceResponse.InstantGenerator handle(DataSourceRequest.InstantGenerator request) {
+        return new DataSourceResponse.InstantGenerator(() -> ESTestCase.randomInstantBetween(Instant.ofEpochMilli(1), MAX_INSTANT));
+    }
+
+    @Override
+    public DataSourceResponse.GeoPointGenerator handle(DataSourceRequest.GeoPointGenerator request) {
+        return new DataSourceResponse.GeoPointGenerator(() -> RandomGeoGenerator.randomPoint(ESTestCase.random()));
     }
 }

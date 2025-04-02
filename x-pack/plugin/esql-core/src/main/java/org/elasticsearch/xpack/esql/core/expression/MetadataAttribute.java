@@ -10,6 +10,7 @@ package org.elasticsearch.xpack.esql.core.expression;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.index.mapper.IdFieldMapper;
 import org.elasticsearch.index.mapper.IgnoredFieldMapper;
@@ -28,8 +29,10 @@ import java.util.Objects;
 import static org.elasticsearch.core.Tuple.tuple;
 
 public class MetadataAttribute extends TypedAttribute {
-    public static final String TIMESTAMP_FIELD = "@timestamp";
+    public static final String TIMESTAMP_FIELD = "@timestamp"; // this is not a true metadata attribute
     public static final String TSID_FIELD = "_tsid";
+    public static final String SCORE = "_score";
+    public static final String INDEX = "_index";
 
     static final NamedWriteableRegistry.Entry ENTRY = new NamedWriteableRegistry.Entry(
         Attribute.class,
@@ -40,7 +43,7 @@ public class MetadataAttribute extends TypedAttribute {
     private static final Map<String, Tuple<DataType, Boolean>> ATTRIBUTES_MAP = Map.of(
         "_version",
         tuple(DataType.LONG, false), // _version field is not searchable
-        "_index",
+        INDEX,
         tuple(DataType.KEYWORD, true),
         IdFieldMapper.NAME,
         tuple(DataType.KEYWORD, false), // actually searchable, but fielddata access on the _id field is disallowed by default
@@ -49,7 +52,9 @@ public class MetadataAttribute extends TypedAttribute {
         SourceFieldMapper.NAME,
         tuple(DataType.SOURCE, false),
         IndexModeFieldMapper.NAME,
-        tuple(DataType.KEYWORD, true)
+        tuple(DataType.KEYWORD, true),
+        SCORE,
+        tuple(DataType.DOUBLE, false)
     );
 
     private final boolean searchable;
@@ -58,18 +63,34 @@ public class MetadataAttribute extends TypedAttribute {
         Source source,
         String name,
         DataType dataType,
-        String qualifier,
         Nullability nullability,
-        NameId id,
+        @Nullable NameId id,
         boolean synthetic,
         boolean searchable
     ) {
-        super(source, name, dataType, qualifier, nullability, id, synthetic);
+        super(source, name, dataType, nullability, id, synthetic);
         this.searchable = searchable;
     }
 
     public MetadataAttribute(Source source, String name, DataType dataType, boolean searchable) {
-        this(source, name, dataType, null, Nullability.TRUE, null, false, searchable);
+        this(source, name, dataType, Nullability.TRUE, null, false, searchable);
+    }
+
+    @Deprecated
+    /**
+     * Old constructor from when this had a qualifier string. Still needed to not break serialization.
+     */
+    private MetadataAttribute(
+        Source source,
+        String name,
+        DataType dataType,
+        @Nullable String qualifier,
+        Nullability nullability,
+        @Nullable NameId id,
+        boolean synthetic,
+        boolean searchable
+    ) {
+        this(source, name, dataType, nullability, id, synthetic, searchable);
     }
 
     @SuppressWarnings("unchecked")
@@ -100,7 +121,8 @@ public class MetadataAttribute extends TypedAttribute {
             Source.EMPTY.writeTo(out);
             out.writeString(name());
             dataType().writeTo(out);
-            out.writeOptionalString(qualifier());
+            // We used to write the qualifier here. We can still do if needed in the future.
+            out.writeOptionalString(null);
             out.writeEnum(nullable());
             id().writeTo(out);
             out.writeBoolean(synthetic());
@@ -118,16 +140,8 @@ public class MetadataAttribute extends TypedAttribute {
     }
 
     @Override
-    protected MetadataAttribute clone(
-        Source source,
-        String name,
-        DataType type,
-        String qualifier,
-        Nullability nullability,
-        NameId id,
-        boolean synthetic
-    ) {
-        return new MetadataAttribute(source, name, type, qualifier, nullability, id, synthetic, searchable);
+    protected MetadataAttribute clone(Source source, String name, DataType type, Nullability nullability, NameId id, boolean synthetic) {
+        return new MetadataAttribute(source, name, type, null, nullability, id, synthetic, searchable);
     }
 
     @Override
@@ -137,15 +151,11 @@ public class MetadataAttribute extends TypedAttribute {
 
     @Override
     protected NodeInfo<? extends Expression> info() {
-        return NodeInfo.create(this, MetadataAttribute::new, name(), dataType(), qualifier(), nullable(), id(), synthetic(), searchable);
+        return NodeInfo.create(this, MetadataAttribute::new, name(), dataType(), nullable(), id(), synthetic(), searchable);
     }
 
     public boolean searchable() {
         return searchable;
-    }
-
-    private MetadataAttribute withSource(Source source) {
-        return new MetadataAttribute(source, name(), dataType(), qualifier(), nullable(), id(), synthetic(), searchable());
     }
 
     public static MetadataAttribute create(Source source, String name) {

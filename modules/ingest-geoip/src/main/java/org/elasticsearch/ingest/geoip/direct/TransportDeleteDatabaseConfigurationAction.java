@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.ingest.geoip.direct;
@@ -20,17 +21,16 @@ import org.elasticsearch.cluster.ClusterStateTaskListener;
 import org.elasticsearch.cluster.SimpleBatchedExecutor;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
-import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.cluster.service.MasterServiceTaskQueue;
 import org.elasticsearch.common.Priority;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.core.Strings;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.ingest.geoip.IngestGeoIpMetadata;
 import org.elasticsearch.ingest.geoip.direct.DeleteDatabaseConfigurationAction.Request;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
@@ -62,8 +62,7 @@ public class TransportDeleteDatabaseConfigurationAction extends TransportMasterN
         TransportService transportService,
         ClusterService clusterService,
         ThreadPool threadPool,
-        ActionFilters actionFilters,
-        IndexNameExpressionResolver indexNameExpressionResolver
+        ActionFilters actionFilters
     ) {
         super(
             DeleteDatabaseConfigurationAction.NAME,
@@ -72,7 +71,6 @@ public class TransportDeleteDatabaseConfigurationAction extends TransportMasterN
             threadPool,
             actionFilters,
             Request::new,
-            indexNameExpressionResolver,
             AcknowledgedResponse::readFrom,
             EsExecutors.DIRECT_EXECUTOR_SERVICE
         );
@@ -87,9 +85,11 @@ public class TransportDeleteDatabaseConfigurationAction extends TransportMasterN
     protected void masterOperation(Task task, Request request, ClusterState state, ActionListener<AcknowledgedResponse> listener)
         throws Exception {
         final String id = request.getDatabaseId();
-        final IngestGeoIpMetadata geoIpMeta = state.metadata().custom(IngestGeoIpMetadata.TYPE, IngestGeoIpMetadata.EMPTY);
+        final IngestGeoIpMetadata geoIpMeta = state.metadata().getProject().custom(IngestGeoIpMetadata.TYPE, IngestGeoIpMetadata.EMPTY);
         if (geoIpMeta.getDatabases().containsKey(id) == false) {
             throw new ResourceNotFoundException("Database configuration not found: {}", id);
+        } else if (geoIpMeta.getDatabases().get(id).database().isReadOnly()) {
+            throw new IllegalArgumentException("Database " + id + " is read only");
         }
         deleteDatabaseConfigurationTaskQueue.submitTask(
             Strings.format("delete-geoip-database-configuration-[%s]", id),
@@ -103,7 +103,9 @@ public class TransportDeleteDatabaseConfigurationAction extends TransportMasterN
             ClusterStateTaskListener {
 
         ClusterState execute(ClusterState currentState) throws Exception {
-            final IngestGeoIpMetadata geoIpMeta = currentState.metadata().custom(IngestGeoIpMetadata.TYPE, IngestGeoIpMetadata.EMPTY);
+            final IngestGeoIpMetadata geoIpMeta = currentState.metadata()
+                .getProject()
+                .custom(IngestGeoIpMetadata.TYPE, IngestGeoIpMetadata.EMPTY);
 
             logger.debug("deleting database configuration [{}]", databaseId);
             Map<String, DatabaseConfigurationMetadata> databases = new HashMap<>(geoIpMeta.getDatabases());

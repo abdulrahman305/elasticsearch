@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.repositories;
@@ -20,7 +21,6 @@ import org.elasticsearch.snapshots.SnapshotsService;
 
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 
 /**
  * Context for finalizing a snapshot.
@@ -43,7 +43,7 @@ public final class FinalizeSnapshotContext extends DelegatingActionListener<Repo
 
     private final IndexVersion repositoryMetaVersion;
 
-    private final Consumer<SnapshotInfo> onDone;
+    private final Runnable onDone;
 
     /**
      * @param updatedShardGenerations updated shard generations
@@ -63,7 +63,7 @@ public final class FinalizeSnapshotContext extends DelegatingActionListener<Repo
         SnapshotInfo snapshotInfo,
         IndexVersion repositoryMetaVersion,
         ActionListener<RepositoryData> listener,
-        Consumer<SnapshotInfo> onDone
+        Runnable onDone
     ) {
         super(listener);
         this.updatedShardGenerations = updatedShardGenerations;
@@ -112,8 +112,8 @@ public final class FinalizeSnapshotContext extends DelegatingActionListener<Repo
         return updatedState;
     }
 
-    public void onDone(SnapshotInfo snapshotInfo) {
-        onDone.accept(snapshotInfo);
+    public void onDone() {
+        onDone.run();
     }
 
     @Override

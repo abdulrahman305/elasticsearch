@@ -70,7 +70,9 @@ public class ConfigurationTestUtils {
             defaultTruncation,
             query,
             profile,
-            tables
+            tables,
+            System.nanoTime(),
+            false
         );
     }
 

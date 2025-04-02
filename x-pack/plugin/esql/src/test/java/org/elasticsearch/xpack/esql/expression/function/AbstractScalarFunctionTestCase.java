@@ -11,6 +11,8 @@ import org.elasticsearch.common.breaker.CircuitBreakingException;
 import org.elasticsearch.common.util.MockBigArrays;
 import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.BlockFactory;
+import org.elasticsearch.compute.data.BytesRefBlock;
+import org.elasticsearch.compute.data.BytesRefVector;
 import org.elasticsearch.compute.data.ElementType;
 import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.data.Vector;
@@ -20,9 +22,10 @@ import org.elasticsearch.compute.operator.EvalOperator.ExpressionEvaluator;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.indices.CrankyCircuitBreakerService;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.FoldContext;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.util.NumericUtils;
-import org.elasticsearch.xpack.esql.optimizer.FoldNull;
+import org.elasticsearch.xpack.esql.optimizer.rules.logical.FoldNull;
 import org.elasticsearch.xpack.esql.planner.PlannerUtils;
 import org.hamcrest.Matcher;
 
@@ -38,7 +41,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.elasticsearch.compute.data.BlockUtils.toJavaObject;
+import static org.elasticsearch.xpack.esql.EsqlTestUtils.unboundLogicalOptimizerContext;
 import static org.hamcrest.Matchers.either;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
@@ -51,7 +54,6 @@ import static org.hamcrest.Matchers.sameInstance;
  * which can be automatically tested against several scenarios (null handling, concurrency, etc).
  */
 public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTestCase {
-
     /**
      * Converts a list of test cases into a list of parameter suppliers.
      * Also, adds a default set of extra test cases.
@@ -61,17 +63,30 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
      *
      * @param entirelyNullPreservesType See {@link #anyNullIsNull(boolean, List)}
      */
-    protected static Iterable<Object[]> parameterSuppliersFromTypedDataWithDefaultChecks(
+    protected static Iterable<Object[]> parameterSuppliersFromTypedDataWithDefaultChecksNoErrors(
+        // TODO remove after removing parameterSuppliersFromTypedDataWithDefaultChecks rename this to that.
         boolean entirelyNullPreservesType,
-        List<TestCaseSupplier> suppliers,
-        PositionalErrorMessageSupplier positionalErrorMessageSupplier
+        List<TestCaseSupplier> suppliers
     ) {
-        return parameterSuppliersFromTypedData(
-            errorsForCasesWithoutExamples(
-                anyNullIsNull(entirelyNullPreservesType, randomizeBytesRefsOffset(suppliers)),
-                positionalErrorMessageSupplier
-            )
-        );
+        return parameterSuppliersFromTypedData(anyNullIsNull(entirelyNullPreservesType, randomizeBytesRefsOffset(suppliers)));
+    }
+
+    /**
+     * Converts a list of test cases into a list of parameter suppliers.
+     * Also, adds a default set of extra test cases.
+     * <p>
+     *     Use if possible, as this method may get updated with new checks in the future.
+     * </p>
+     *
+     * @param nullsExpectedType See {@link #anyNullIsNull(List, ExpectedType, ExpectedEvaluatorToString)}
+     * @param evaluatorToString See {@link #anyNullIsNull(List, ExpectedType, ExpectedEvaluatorToString)}
+     */
+    protected static Iterable<Object[]> parameterSuppliersFromTypedDataWithDefaultChecksNoErrors(
+        ExpectedType nullsExpectedType,
+        ExpectedEvaluatorToString evaluatorToString,
+        List<TestCaseSupplier> suppliers
+    ) {
+        return parameterSuppliersFromTypedData(anyNullIsNull(randomizeBytesRefsOffset(suppliers), nullsExpectedType, evaluatorToString));
     }
 
     public final void testEvaluate() {
@@ -82,7 +97,6 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
             assertTypeResolutionFailure(expression);
             return;
         }
-        assumeTrue("Expected type must be representable to build an evaluator", DataType.isRepresentable(testCase.expectedType()));
         logger.info(
             "Test Values: " + testCase.getData().stream().map(TestCaseSupplier.TypedData::toString).collect(Collectors.joining(","))
         );
@@ -90,25 +104,53 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
         if (resolution.unresolved()) {
             throw new AssertionError("expected resolved " + resolution.message());
         }
-        expression = new FoldNull().rule(expression);
+        expression = new FoldNull().rule(expression, unboundLogicalOptimizerContext());
         assertThat(expression.dataType(), equalTo(testCase.expectedType()));
         logger.info("Result type: " + expression.dataType());
 
         Object result;
         try (ExpressionEvaluator evaluator = evaluator(expression).get(driverContext())) {
-            try (Block block = evaluator.eval(row(testCase.getDataValues()))) {
+            if (testCase.getExpectedBuildEvaluatorWarnings() != null) {
+                assertWarnings(testCase.getExpectedBuildEvaluatorWarnings());
+            }
+            Page row = row(testCase.getDataValues());
+            try (Block block = evaluator.eval(row)) {
+                assertThat(block.getPositionCount(), is(1));
                 result = toJavaObjectUnsignedLongAware(block, 0);
+                extraBlockTests(row, block);
+            } finally {
+                row.releaseBlocks();
             }
         }
-        assertThat(result, not(equalTo(Double.NaN)));
-        assert testCase.getMatcher().matches(Double.POSITIVE_INFINITY) == false;
-        assertThat(result, not(equalTo(Double.POSITIVE_INFINITY)));
-        assert testCase.getMatcher().matches(Double.NEGATIVE_INFINITY) == false;
-        assertThat(result, not(equalTo(Double.NEGATIVE_INFINITY)));
-        assertThat(result, testCase.getMatcher());
-        if (testCase.getExpectedWarnings() != null) {
-            assertWarnings(testCase.getExpectedWarnings());
+        assertTestCaseResultAndWarnings(result);
+    }
+
+    /**
+     * Extra assertions on the output block.
+     */
+    protected void extraBlockTests(Page in, Block out) {}
+
+    protected final void assertIsOrdIfInIsOrd(Page in, Block out) {
+        BytesRefBlock inBytes = in.getBlock(0);
+        BytesRefBlock outBytes = (BytesRefBlock) out;
+
+        BytesRefVector inVec = inBytes.asVector();
+        if (inVec == null) {
+            assertThat(outBytes.asVector(), nullValue());
+            return;
         }
+        BytesRefVector outVec = outBytes.asVector();
+
+        if (inVec.isConstant()) {
+            assertTrue(outVec.isConstant());
+            return;
+        }
+
+        if (inVec.asOrdinals() != null) {
+            assertThat(outBytes.asOrdinals(), not(nullValue()));
+            return;
+        }
+        assertThat(outBytes.asOrdinals(), nullValue());
     }
 
     /**
@@ -152,6 +194,10 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
      */
     public final void testCrankyEvaluateBlockWithoutNulls() {
         assumeTrue("sometimes the cranky breaker silences warnings, just skip these cases", testCase.getExpectedWarnings() == null);
+        assumeTrue(
+            "sometimes the cranky breaker silences warnings, just skip these cases",
+            testCase.getExpectedBuildEvaluatorWarnings() == null
+        );
         try {
             testEvaluateBlock(driverContext().blockFactory(), crankyContext(), false);
         } catch (CircuitBreakingException ex) {
@@ -165,6 +211,10 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
      */
     public final void testCrankyEvaluateBlockWithNulls() {
         assumeTrue("sometimes the cranky breaker silences warnings, just skip these cases", testCase.getExpectedWarnings() == null);
+        assumeTrue(
+            "sometimes the cranky breaker silences warnings, just skip these cases",
+            testCase.getExpectedBuildEvaluatorWarnings() == null
+        );
         try {
             testEvaluateBlock(driverContext().blockFactory(), crankyContext(), true);
         } catch (CircuitBreakingException ex) {
@@ -183,7 +233,6 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
             return;
         }
         assumeTrue("Can't build evaluator", testCase.canBuildEvaluator());
-        assumeTrue("Expected type must be representable to build an evaluator", DataType.isRepresentable(testCase.expectedType()));
         int positions = between(1, 1024);
         List<TestCaseSupplier.TypedData> data = testCase.getData();
         Page onePositionPage = row(testCase.getDataValues());
@@ -213,13 +262,15 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
                 }
                 b++;
             }
-            try (
-                ExpressionEvaluator eval = evaluator(expression).get(context);
-                Block block = eval.eval(new Page(positions, manyPositionsBlocks))
-            ) {
+            Page in = new Page(positions, manyPositionsBlocks);
+            try (ExpressionEvaluator eval = evaluator(expression).get(context); Block block = eval.eval(in)) {
+                if (testCase.getExpectedBuildEvaluatorWarnings() != null) {
+                    assertWarnings(testCase.getExpectedBuildEvaluatorWarnings());
+                }
+                assertThat(block.getPositionCount(), is(positions));
                 for (int p = 0; p < positions; p++) {
                     if (nullPositions.contains(p)) {
-                        assertThat(toJavaObject(block, p), allNullsMatcher());
+                        assertThat(toJavaObjectUnsignedLongAware(block, p), allNullsMatcher());
                         continue;
                     }
                     assertThat(toJavaObjectUnsignedLongAware(block, p), testCase.getMatcher());
@@ -229,6 +280,7 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
                     block.blockFactory(),
                     either(sameInstance(context.blockFactory())).or(sameInstance(inputBlockFactory))
                 );
+                extraBlockTests(in, block);
             }
         } finally {
             Releasables.close(onePositionPage::releaseBlocks, Releasables.wrap(manyPositionsBlocks));
@@ -245,10 +297,12 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
             return;
         }
         assumeTrue("Can't build evaluator", testCase.canBuildEvaluator());
-        assumeTrue("Expected type must be representable to build an evaluator", DataType.isRepresentable(testCase.expectedType()));
         int count = 10_000;
         int threads = 5;
         var evalSupplier = evaluator(expression);
+        if (testCase.getExpectedBuildEvaluatorWarnings() != null) {
+            assertWarnings(testCase.getExpectedBuildEvaluatorWarnings());
+        }
         ExecutorService exec = Executors.newFixedThreadPool(threads);
         try {
             List<Future<?>> futures = new ArrayList<>();
@@ -260,6 +314,7 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
                     try (EvalOperator.ExpressionEvaluator eval = evalSupplier.get(driverContext())) {
                         for (int c = 0; c < count; c++) {
                             try (Block block = eval.eval(page)) {
+                                assertThat(block.getPositionCount(), is(1));
                                 assertThat(toJavaObjectUnsignedLongAware(block, 0), testCase.getMatcher());
                             }
                         }
@@ -283,6 +338,9 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
         assumeTrue("Can't build evaluator", testCase.canBuildEvaluator());
         var factory = evaluator(expression);
         try (ExpressionEvaluator ev = factory.get(driverContext())) {
+            if (testCase.getExpectedBuildEvaluatorWarnings() != null) {
+                assertWarnings(testCase.getExpectedBuildEvaluatorWarnings());
+            }
             assertThat(ev.toString(), testCase.evaluatorToString());
         }
     }
@@ -295,64 +353,42 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
         }
         assumeTrue("Can't build evaluator", testCase.canBuildEvaluator());
         var factory = evaluator(buildFieldExpression(testCase));
+        if (testCase.getExpectedBuildEvaluatorWarnings() != null) {
+            assertWarnings(testCase.getExpectedBuildEvaluatorWarnings());
+        }
         assertThat(factory.toString(), testCase.evaluatorToString());
     }
 
-    public final void testFold() {
+    public void testFold() {
         Expression expression = buildLiteralExpression(testCase);
         if (testCase.getExpectedTypeError() != null) {
             assertTypeResolutionFailure(expression);
             return;
         }
         assertFalse("expected resolved", expression.typeResolved().unresolved());
-        Expression nullOptimized = new FoldNull().rule(expression);
+        Expression nullOptimized = new FoldNull().rule(expression, unboundLogicalOptimizerContext());
         assertThat(nullOptimized.dataType(), equalTo(testCase.expectedType()));
         assertTrue(nullOptimized.foldable());
         if (testCase.foldingExceptionClass() == null) {
-            Object result = nullOptimized.fold();
+            Object result = nullOptimized.fold(FoldContext.small());
             // Decode unsigned longs into BigIntegers
             if (testCase.expectedType() == DataType.UNSIGNED_LONG && result != null) {
-                result = NumericUtils.unsignedLongAsBigInteger((Long) result);
+                if (result instanceof List<?> l) {
+                    result = l.stream().map(v -> NumericUtils.unsignedLongAsBigInteger((Long) v)).toList();
+                } else {
+                    result = NumericUtils.unsignedLongAsBigInteger((Long) result);
+                }
             }
             assertThat(result, testCase.getMatcher());
+            if (testCase.getExpectedBuildEvaluatorWarnings() != null) {
+                assertWarnings(testCase.getExpectedBuildEvaluatorWarnings());
+            }
             if (testCase.getExpectedWarnings() != null) {
                 assertWarnings(testCase.getExpectedWarnings());
             }
         } else {
-            Throwable t = expectThrows(testCase.foldingExceptionClass(), nullOptimized::fold);
+            Throwable t = expectThrows(testCase.foldingExceptionClass(), () -> nullOptimized.fold(FoldContext.small()));
             assertThat(t.getMessage(), equalTo(testCase.foldingExceptionMessage()));
-        }
-    }
-
-    public static String errorMessageStringForBinaryOperators(
-        boolean includeOrdinal,
-        List<Set<DataType>> validPerPosition,
-        List<DataType> types,
-        PositionalErrorMessageSupplier positionalErrorMessageSupplier
-    ) {
-        try {
-            return typeErrorMessage(includeOrdinal, validPerPosition, types, positionalErrorMessageSupplier);
-        } catch (IllegalStateException e) {
-            // This means all the positional args were okay, so the expected error is from the combination
-            if (types.get(0).equals(DataType.UNSIGNED_LONG)) {
-                return "first argument of [] is [unsigned_long] and second is ["
-                    + types.get(1).typeName()
-                    + "]. [unsigned_long] can only be operated on together with another [unsigned_long]";
-
-            }
-            if (types.get(1).equals(DataType.UNSIGNED_LONG)) {
-                return "first argument of [] is ["
-                    + types.get(0).typeName()
-                    + "] and second is [unsigned_long]. [unsigned_long] can only be operated on together with another [unsigned_long]";
-            }
-            return "first argument of [] is ["
-                + (types.get(0).isNumeric() ? "numeric" : types.get(0).typeName())
-                + "] so second argument must also be ["
-                + (types.get(0).isNumeric() ? "numeric" : types.get(0).typeName())
-                + "] but was ["
-                + types.get(1).typeName()
-                + "]";
-
         }
     }
 
@@ -360,7 +396,6 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
      * Adds test cases containing unsupported parameter types that immediately fail.
      */
     protected static List<TestCaseSupplier> failureForCasesWithoutExamples(List<TestCaseSupplier> testCaseSuppliers) {
-        typesRequired(testCaseSuppliers);
         List<TestCaseSupplier> suppliers = new ArrayList<>(testCaseSuppliers.size());
         suppliers.addAll(testCaseSuppliers);
 
@@ -391,7 +426,7 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
         String typeNameOverflow = dataType.typeName().toLowerCase(Locale.ROOT) + " overflow";
         return new TestCaseSupplier(
             "<" + typeNameOverflow + ">",
-            List.of(dataType),
+            List.of(dataType, dataType),
             () -> new TestCaseSupplier.TestCase(
                 List.of(
                     new TestCaseSupplier.TypedData(lhsSupplier.get(), dataType, "lhs"),
@@ -400,8 +435,8 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
                 evaluator + "[lhs=Attribute[channel=0], rhs=Attribute[channel=1]]",
                 dataType,
                 is(nullValue())
-            ).withWarning("Line -1:-1: evaluation of [] failed, treating result as null. Only first 20 failures recorded.")
-                .withWarning("Line -1:-1: java.lang.ArithmeticException: " + typeNameOverflow)
+            ).withWarning("Line 1:1: evaluation of [source] failed, treating result as null. Only first 20 failures recorded.")
+                .withWarning("Line 1:1: java.lang.ArithmeticException: " + typeNameOverflow)
         );
     }
 }

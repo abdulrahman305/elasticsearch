@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.support.broadcast.unpromotable;
@@ -332,12 +333,12 @@ public class TransportBroadcastUnpromotableActionTests extends ESTestCase {
 
         // We were able to mark shards as stale, so the request finishes successfully
         assertThat(safeAwait(broadcastUnpromotableRequest(wrongRoutingTable, true)), equalTo(ActionResponse.Empty.INSTANCE));
-        for (var shardRouting : wrongRoutingTable.unpromotableShards()) {
+        for (var shardRouting : wrongRoutingTable.assignedUnpromotableShards()) {
             Mockito.verify(shardStateAction)
                 .remoteShardFailed(
                     eq(shardRouting.shardId()),
                     eq(shardRouting.allocationId().getId()),
-                    eq(state.metadata().index(index).primaryTerm(shardRouting.shardId().getId())),
+                    eq(state.metadata().getProject().index(index).primaryTerm(shardRouting.shardId().getId())),
                     eq(true),
                     eq("mark unpromotable copy as stale after refresh failure"),
                     any(Exception.class),

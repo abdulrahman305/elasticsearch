@@ -16,6 +16,7 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.features.NodeFeature;
 import org.elasticsearch.xcontent.ConstructingObjectParser;
 import org.elasticsearch.xcontent.ParseField;
 import org.elasticsearch.xcontent.ToXContentObject;
@@ -81,6 +82,8 @@ public class QueryRule implements Writeable, ToXContentObject {
         }
     }
 
+    public static final NodeFeature NUMERIC_VALIDATION = new NodeFeature("query_rules.numeric_validation", true);
+
     /**
      * Public constructor.
      *
@@ -130,7 +133,7 @@ public class QueryRule implements Writeable, ToXContentObject {
         this.criteria = in.readCollectionAsList(QueryRuleCriteria::new);
         this.actions = in.readGenericMap();
 
-        if (in.getTransportVersion().onOrAfter(TransportVersions.QUERY_RULE_CRUD_API_PUT)) {
+        if (in.getTransportVersion().onOrAfter(TransportVersions.V_8_15_0)) {
             this.priority = in.readOptionalVInt();
         } else {
             this.priority = null;
@@ -140,7 +143,6 @@ public class QueryRule implements Writeable, ToXContentObject {
     }
 
     private void validate() {
-
         if (priority != null && (priority < MIN_PRIORITY || priority > MAX_PRIORITY)) {
             throw new IllegalArgumentException("Priority was " + priority + ", must be between " + MIN_PRIORITY + " and " + MAX_PRIORITY);
         }
@@ -155,6 +157,13 @@ public class QueryRule implements Writeable, ToXContentObject {
                 throw new ElasticsearchParseException(type.toString() + " query rule actions must contain only one of either ids or docs");
             }
         }
+
+        criteria.forEach(criterion -> {
+            List<Object> values = criterion.criteriaValues();
+            if (values != null) {
+                values.forEach(criterion.criteriaType()::validateInput);
+            }
+        });
     }
 
     private void validateIdOrDocAction(Object action) {
@@ -175,7 +184,7 @@ public class QueryRule implements Writeable, ToXContentObject {
         out.writeString(type.toString());
         out.writeCollection(criteria);
         out.writeGenericMap(actions);
-        if (out.getTransportVersion().onOrAfter(TransportVersions.QUERY_RULE_CRUD_API_PUT)) {
+        if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_15_0)) {
             out.writeOptionalVInt(priority);
         }
     }
@@ -331,12 +340,8 @@ public class QueryRule implements Writeable, ToXContentObject {
         return new AppliedQueryRules(pinnedDocs, excludedDocs);
     }
 
-    @SuppressWarnings("unchecked")
-    private List<SpecifiedDocument> identifyMatchingDocs(Map<String, Object> matchCriteria) {
-        List<SpecifiedDocument> matchingDocs = new ArrayList<>();
+    public boolean isRuleMatch(Map<String, Object> matchCriteria) {
         Boolean isRuleMatch = null;
-
-        // All specified criteria in a rule must match for the rule to be applied
         for (QueryRuleCriteria criterion : criteria) {
             for (String match : matchCriteria.keySet()) {
                 final Object matchValue = matchCriteria.get(match);
@@ -349,8 +354,13 @@ public class QueryRule implements Writeable, ToXContentObject {
                 }
             }
         }
+        return isRuleMatch != null && isRuleMatch;
+    }
 
-        if (isRuleMatch != null && isRuleMatch) {
+    @SuppressWarnings("unchecked")
+    private List<SpecifiedDocument> identifyMatchingDocs(Map<String, Object> matchCriteria) {
+        List<SpecifiedDocument> matchingDocs = new ArrayList<>();
+        if (isRuleMatch(matchCriteria)) {
             if (actions.containsKey(IDS_FIELD.getPreferredName())) {
                 matchingDocs.addAll(
                     ((List<String>) actions.get(IDS_FIELD.getPreferredName())).stream().map(id -> new SpecifiedDocument(null, id)).toList()

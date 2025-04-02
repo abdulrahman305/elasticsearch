@@ -1,12 +1,14 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.logstashbridge.ingest;
 
+import org.elasticsearch.core.FixForMultiProject;
 import org.elasticsearch.ingest.Pipeline;
 import org.elasticsearch.logstashbridge.StableBridgeAPI;
 import org.elasticsearch.logstashbridge.script.ScriptServiceBridge;
@@ -19,6 +21,7 @@ public class PipelineBridge extends StableBridgeAPI.Proxy<Pipeline> {
         return new PipelineBridge(pipeline);
     }
 
+    @FixForMultiProject(description = "should we pass a non-null project ID here?")
     public static PipelineBridge create(
         String id,
         Map<String, Object> config,
@@ -26,7 +29,13 @@ public class PipelineBridge extends StableBridgeAPI.Proxy<Pipeline> {
         ScriptServiceBridge scriptServiceBridge
     ) throws Exception {
         return wrap(
-            Pipeline.create(id, config, StableBridgeAPI.unwrap(processorFactories), StableBridgeAPI.unwrapNullable(scriptServiceBridge))
+            Pipeline.create(
+                id,
+                config,
+                StableBridgeAPI.unwrap(processorFactories),
+                StableBridgeAPI.unwrapNullable(scriptServiceBridge),
+                null
+            )
         );
     }
 

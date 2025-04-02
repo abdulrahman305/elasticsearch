@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.codec.tsdb;
@@ -58,6 +59,7 @@ public class ES87TSDBDocValuesFormatTests extends BaseDocValuesFormatTestCase {
         try (Directory directory = newDirectory()) {
             Analyzer analyzer = new MockAnalyzer(random());
             IndexWriterConfig conf = newIndexWriterConfig(analyzer);
+            conf.setCodec(getCodec());
             conf.setMergePolicy(newLogMergePolicy());
             try (RandomIndexWriter iwriter = new RandomIndexWriter(random(), directory, conf)) {
                 for (int i = 0; i < NUM_DOCS; i++) {
@@ -94,6 +96,7 @@ public class ES87TSDBDocValuesFormatTests extends BaseDocValuesFormatTestCase {
         try (Directory directory = newDirectory()) {
             Analyzer analyzer = new MockAnalyzer(random());
             IndexWriterConfig conf = newIndexWriterConfig(analyzer);
+            conf.setCodec(getCodec());
             conf.setMergePolicy(newLogMergePolicy());
             try (RandomIndexWriter iwriter = new RandomIndexWriter(random(), directory, conf)) {
                 for (int i = 0; i < NUM_DOCS; i++) {
@@ -114,7 +117,6 @@ public class ES87TSDBDocValuesFormatTests extends BaseDocValuesFormatTestCase {
                     assertEquals(0, field.nextOrd());
                     BytesRef scratch = field.lookupOrd(0);
                     assertEquals("value", scratch.utf8ToString());
-                    assertEquals(SortedSetDocValues.NO_MORE_ORDS, field.nextOrd());
                 }
                 assertEquals(DocIdSetIterator.NO_MORE_DOCS, field.nextDoc());
                 for (int i = 0; i < NUM_DOCS; i++) {
@@ -125,7 +127,6 @@ public class ES87TSDBDocValuesFormatTests extends BaseDocValuesFormatTestCase {
                     BytesRef scratch = fieldN.lookupOrd(0);
                     assertEquals("value" + i, scratch.utf8ToString());
                     assertEquals(DocIdSetIterator.NO_MORE_DOCS, fieldN.nextDoc());
-                    assertEquals(SortedSetDocValues.NO_MORE_ORDS, fieldN.nextOrd());
                 }
             }
         }
@@ -133,6 +134,7 @@ public class ES87TSDBDocValuesFormatTests extends BaseDocValuesFormatTestCase {
 
     public void testOneDocManyValues() throws Exception {
         IndexWriterConfig config = new IndexWriterConfig();
+        config.setCodec(getCodec());
         try (Directory dir = newDirectory(); IndexWriter writer = new IndexWriter(dir, config)) {
             int numValues = 128 + random().nextInt(1024); // > 2^7 to require two blocks
             Document d = new Document();
@@ -160,6 +162,7 @@ public class ES87TSDBDocValuesFormatTests extends BaseDocValuesFormatTestCase {
         final Map<String, long[]> sortedNumbers = new HashMap<>(); // key -> numbers
         try (Directory directory = newDirectory()) {
             IndexWriterConfig conf = newIndexWriterConfig();
+            conf.setCodec(getCodec());
             try (RandomIndexWriter writer = new RandomIndexWriter(random(), directory, conf)) {
                 for (int i = 0; i < numDocs; i++) {
                     Document doc = new Document();

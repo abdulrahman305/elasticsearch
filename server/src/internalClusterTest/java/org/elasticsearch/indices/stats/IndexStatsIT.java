@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.indices.stats;
@@ -57,6 +58,7 @@ import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
 import org.elasticsearch.test.ESIntegTestCase.Scope;
 import org.elasticsearch.test.InternalSettingsPlugin;
+import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.xcontent.XContentType;
 
 import java.io.IOException;
@@ -77,6 +79,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.elasticsearch.cluster.metadata.IndexMetadata.SETTING_NUMBER_OF_REPLICAS;
@@ -237,7 +240,7 @@ public class IndexStatsIT extends ESIntegTestCase {
                 .setMapping("field", "type=text,fielddata=true")
         );
         ensureGreen();
-        clusterAdmin().prepareHealth().setWaitForGreenStatus().get();
+        clusterAdmin().prepareHealth(TEST_REQUEST_TIMEOUT).setWaitForGreenStatus().get();
         prepareIndex("test").setId("1").setSource("field", "value1").get();
         prepareIndex("test").setId("2").setSource("field", "value2").get();
         indicesAdmin().prepareRefresh().get();
@@ -464,7 +467,7 @@ public class IndexStatsIT extends ESIntegTestCase {
         assertThat(stats.getPrimaries().getIndexing().getTotal().getThrottleTime().millis(), equalTo(0L));
     }
 
-    public void testThrottleStats() throws Exception {
+    public void testThrottleStats() {
         assertAcked(
             prepareCreate("test").setSettings(
                 settingsBuilder().put(IndexMetadata.SETTING_NUMBER_OF_SHARDS, "1")
@@ -477,31 +480,38 @@ public class IndexStatsIT extends ESIntegTestCase {
             )
         );
         ensureGreen();
-        long termUpto = 0;
-        IndicesStatsResponse stats;
         // make sure we see throttling kicking in:
-        boolean done = false;
+        AtomicBoolean done = new AtomicBoolean();
+        AtomicLong termUpTo = new AtomicLong();
         long start = System.currentTimeMillis();
-        while (done == false) {
-            for (int i = 0; i < 100; i++) {
-                // Provoke slowish merging by making many unique terms:
-                StringBuilder sb = new StringBuilder();
-                for (int j = 0; j < 100; j++) {
-                    sb.append(' ');
-                    sb.append(termUpto++);
-                }
-                prepareIndex("test").setId("" + termUpto).setSource("field" + (i % 10), sb.toString()).get();
-                if (i % 2 == 0) {
+        for (int threadIdx = 0; threadIdx < 5; threadIdx++) {
+            int finalThreadIdx = threadIdx;
+            new Thread(() -> {
+                IndicesStatsResponse stats;
+                while (done.get() == false) {
+                    for (int i = 0; i < 100; i++) {
+                        // Provoke slowish merging by making many unique terms:
+                        StringBuilder sb = new StringBuilder();
+                        for (int j = 0; j < 100; j++) {
+                            sb.append(' ');
+                            sb.append(termUpTo.incrementAndGet());
+                        }
+                        prepareIndex("test").setId("" + termUpTo.get()).setSource("field" + (i % 10), sb.toString()).get();
+                        if (i % 2 == 0) {
+                            refresh();
+                        }
+                    }
                     refresh();
+                    if (finalThreadIdx == 0) {
+                        stats = indicesAdmin().prepareStats().get();
+                        done.set(stats.getPrimaries().getIndexing().getTotal().getThrottleTime().millis() > 0);
+                    }
+                    if (System.currentTimeMillis() - start > 300 * 1000) { // Wait 5 minutes for throttling to kick in
+                        done.set(true);
+                        fail("index throttling didn't kick in after 5 minutes of intense merging");
+                    }
                 }
-            }
-            refresh();
-            stats = indicesAdmin().prepareStats().get();
-            // nodesStats = clusterAdmin().prepareNodesStats().setIndices(true).get();
-            done = stats.getPrimaries().getIndexing().getTotal().getThrottleTime().millis() > 0;
-            if (System.currentTimeMillis() - start > 300 * 1000) { // Wait 5 minutes for throttling to kick in
-                fail("index throttling didn't kick in after 5 minutes of intense merging");
-            }
+            }).start();
         }
 
         // Optimize & flush and wait; else we sometimes get a "Delete Index failed - not acked"
@@ -1081,6 +1091,7 @@ public class IndexStatsIT extends ESIntegTestCase {
         assertEquals(total, shardTotal);
     }
 
+    @TestLogging(value = "org.elasticsearch.cluster.service:TRACE", reason = "https://github.com/elastic/elasticsearch/issues/124447")
     public void testFilterCacheStats() throws Exception {
         Settings settings = Settings.builder()
             .put(indexSettings())
@@ -1355,7 +1366,11 @@ public class IndexStatsIT extends ESIntegTestCase {
             for (IndexService indexService : indexServices) {
                 for (IndexShard indexShard : indexService) {
                     indexShard.sync();
-                    assertThat(indexShard.getLastSyncedGlobalCheckpoint(), equalTo(indexShard.getLastKnownGlobalCheckpoint()));
+                    assertThat(
+                        "Routing entry for shard " + indexShard.routingEntry().toString(),
+                        indexShard.getLastSyncedGlobalCheckpoint(),
+                        equalTo(indexShard.getLastKnownGlobalCheckpoint())
+                    );
                 }
             }
         }

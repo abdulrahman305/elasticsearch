@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.mapper;
@@ -75,7 +76,7 @@ public abstract class NumberFieldMapperTests extends MapperTestCase {
                 minimalMapping(b);
                 b.field("script", "test");
                 b.field("on_script_error", "continue");
-            }, m -> assertThat((m).onScriptError, is(OnScriptError.CONTINUE)));
+            }, m -> assertThat((m).builderParams.onScriptError(), is(OnScriptError.CONTINUE)));
         }
     }
 
@@ -395,7 +396,36 @@ public abstract class NumberFieldMapperTests extends MapperTestCase {
 
     protected abstract Number randomNumber();
 
-    protected final class NumberSyntheticSourceSupport implements SyntheticSourceSupport {
+    protected final class NumberSyntheticSourceSupportForKeepTests extends NumberSyntheticSourceSupport {
+        private final boolean preserveSource;
+
+        protected NumberSyntheticSourceSupportForKeepTests(
+            Function<Number, Number> round,
+            boolean ignoreMalformed,
+            Mapper.SourceKeepMode sourceKeepMode
+        ) {
+            super(round, ignoreMalformed);
+            this.preserveSource = sourceKeepMode == Mapper.SourceKeepMode.ALL;
+        }
+
+        @Override
+        public boolean preservesExactSource() {
+            return preserveSource;
+        }
+
+        @Override
+        public SyntheticSourceExample example(int maxVals) {
+            var example = super.example(maxVals);
+            return new SyntheticSourceExample(
+                example.expectedForSyntheticSource(),
+                example.expectedForSyntheticSource(),
+                example.expectedForBlockLoader(),
+                example.mapping()
+            );
+        }
+    }
+
+    protected class NumberSyntheticSourceSupport implements SyntheticSourceSupport {
         private final Long nullValue = usually() ? null : randomNumber().longValue();
         private final boolean coerce = rarely();
         private final boolean docValues = randomBoolean();

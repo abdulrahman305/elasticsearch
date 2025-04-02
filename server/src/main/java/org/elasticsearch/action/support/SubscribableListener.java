@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.support;
@@ -263,6 +264,13 @@ public class SubscribableListener<T> implements ActionListener<T> {
      */
     public final boolean isDone() {
         return isDone(state);
+    }
+
+    /**
+     * @return return {@code true} if and only if this listener is done and has been completed successfully
+     */
+    public final boolean isSuccess() {
+        return state instanceof SuccessResult;
     }
 
     /**
@@ -577,5 +585,16 @@ public class SubscribableListener<T> implements ActionListener<T> {
 
     private Object compareAndExchangeState(Object expectedValue, Object newValue) {
         return VH_STATE_FIELD.compareAndExchange(this, expectedValue, newValue);
+    }
+
+    @SuppressWarnings("rawtypes")
+    private static final SubscribableListener NULL_SUCCESS = newSucceeded(null);
+
+    /**
+     * Same as {@link #newSucceeded(Object)} but always returns the same instance with result value {@code null}.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> SubscribableListener<T> nullSuccess() {
+        return NULL_SUCCESS;
     }
 }

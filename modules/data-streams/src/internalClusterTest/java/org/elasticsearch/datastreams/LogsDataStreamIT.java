@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.datastreams;
@@ -284,12 +285,12 @@ public class LogsDataStreamIT extends ESSingleNodeTestCase {
         final GetDataStreamAction.Response getDataStreamResponse = client().execute(GetDataStreamAction.INSTANCE, getDataStreamRequest)
             .actionGet();
         final DataStream dataStream = getDataStreamResponse.getDataStreams().get(0).getDataStream();
-        final DataStream.DataStreamIndices backingIndices = dataStream.getBackingIndices();
+        final DataStream.DataStreamIndices backingIndices = dataStream.getDataComponent();
         final Iterator<IndexMode> indexModesIterator = modes.iterator();
         assertThat(backingIndices.getIndices().size(), Matchers.equalTo(modes.size()));
         for (final Index index : backingIndices.getIndices()) {
             final GetSettingsResponse getSettingsResponse = indicesAdmin().getSettings(
-                new GetSettingsRequest().indices(index.getName()).includeDefaults(true)
+                new GetSettingsRequest(TEST_REQUEST_TIMEOUT).indices(index.getName()).includeDefaults(true)
             ).actionGet();
             final Settings settings = getSettingsResponse.getIndexToSettings().get(index.getName());
             assertThat(settings.get("index.mode"), Matchers.equalTo(indexModesIterator.next().getName()));

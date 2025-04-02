@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.snapshots;
@@ -361,7 +362,8 @@ public class InternalSnapshotsInfoServiceTests extends ESTestCase {
                 snapshotsInfoService
             );
             assertCriticalWarnings(
-                "[cluster.routing.allocation.type] setting was deprecated in Elasticsearch and will be removed in a future release."
+                "[cluster.routing.allocation.type] setting was deprecated in Elasticsearch and will be removed in a future release. "
+                    + "See the breaking changes documentation for the next major version."
             );
             applyClusterState(
                 "starting shards for " + indexName,
@@ -373,7 +375,7 @@ public class InternalSnapshotsInfoServiceTests extends ESTestCase {
         } else {
             // simulate deletion of the index
             applyClusterState("delete index " + indexName, clusterState -> deleteIndex(clusterState, indexName));
-            assertFalse(clusterService.state().metadata().hasIndex(indexName));
+            assertFalse(clusterService.state().metadata().getProject().hasIndex(indexName));
         }
 
         assertThat(snapshotsInfoService.numberOfKnownSnapshotShardSizes(), equalTo(0));
@@ -403,7 +405,7 @@ public class InternalSnapshotsInfoServiceTests extends ESTestCase {
     }
 
     private ClusterState addUnassignedShards(final ClusterState currentState, String indexName, int numberOfShards) {
-        assertThat(currentState.metadata().hasIndex(indexName), is(false));
+        assertThat(currentState.metadata().getProject().hasIndex(indexName), is(false));
 
         final IndexMetadata.Builder indexMetadataBuilder = IndexMetadata.builder(indexName)
             .settings(indexSettings(IndexVersion.current(), numberOfShards, 0).put(SETTING_CREATION_DATE, System.currentTimeMillis()));

@@ -11,6 +11,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.inference.InferenceServiceResults;
+import org.elasticsearch.inference.InputType;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.xpack.inference.common.Truncator;
 import org.elasticsearch.xpack.inference.external.http.retry.RequestSender;
@@ -46,9 +47,12 @@ public class AzureAiStudioEmbeddingsRequestManager extends AzureAiStudioRequestM
         Supplier<Boolean> hasRequestCompletedFunction,
         ActionListener<InferenceServiceResults> listener
     ) {
-        List<String> docsInput = DocumentsOnlyInput.of(inferenceInputs).getInputs();
+        EmbeddingsInput input = EmbeddingsInput.of(inferenceInputs);
+        List<String> docsInput = input.getInputs();
+        InputType inputType = input.getInputType();
+
         var truncatedInput = truncate(docsInput, model.getServiceSettings().maxInputTokens());
-        AzureAiStudioEmbeddingsRequest request = new AzureAiStudioEmbeddingsRequest(truncator, truncatedInput, model);
+        AzureAiStudioEmbeddingsRequest request = new AzureAiStudioEmbeddingsRequest(truncator, truncatedInput, inputType, model);
         execute(new ExecutableInferenceRequest(requestSender, logger, request, HANDLER, hasRequestCompletedFunction, listener));
     }
 
@@ -56,7 +60,8 @@ public class AzureAiStudioEmbeddingsRequestManager extends AzureAiStudioRequestM
         return new AzureMistralOpenAiExternalResponseHandler(
             "azure ai studio text embedding",
             new AzureAiStudioEmbeddingsResponseEntity(),
-            ErrorMessageResponseEntity::fromResponse
+            ErrorMessageResponseEntity::fromResponse,
+            false
         );
     }
 

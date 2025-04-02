@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.repositories.s3;
@@ -13,6 +14,7 @@ import com.amazonaws.AmazonWebServiceRequest;
 import com.amazonaws.Request;
 import com.amazonaws.Response;
 import com.amazonaws.metrics.RequestMetricCollector;
+import com.amazonaws.retry.RetryUtils;
 import com.amazonaws.services.s3.model.CannedAccessControlList;
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
 import com.amazonaws.services.s3.model.MultiObjectDeleteException;
@@ -24,15 +26,18 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.cluster.metadata.RepositoryMetadata;
+import org.elasticsearch.common.BackoffPolicy;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.blobstore.BlobContainer;
 import org.elasticsearch.common.blobstore.BlobPath;
 import org.elasticsearch.common.blobstore.BlobStore;
+import org.elasticsearch.common.blobstore.BlobStoreActionStats;
 import org.elasticsearch.common.blobstore.BlobStoreException;
 import org.elasticsearch.common.blobstore.OperationPurpose;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.repositories.RepositoriesMetrics;
 import org.elasticsearch.threadpool.ThreadPool;
 
 import java.io.IOException;
@@ -47,11 +52,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
-import static org.elasticsearch.core.Strings.format;
 import static org.elasticsearch.rest.RestStatus.REQUESTED_RANGE_NOT_SATISFIED;
 
 class S3BlobStore implements BlobStore {
@@ -63,6 +66,8 @@ class S3BlobStore implements BlobStore {
      * @see <a href="https://docs.aws.amazon.com/AmazonS3/latest/API/multiobjectdeleteapi.html">S3 Documentation</a>.
      */
     static final int MAX_BULK_DELETES = 1000;
+
+    static final int MAX_DELETE_EXCEPTIONS = 10;
 
     private static final Logger logger = LogManager.getLogger(S3BlobStore.class);
 
@@ -89,6 +94,9 @@ class S3BlobStore implements BlobStore {
     private final StatsCollectors statsCollectors = new StatsCollectors();
 
     private final int bulkDeletionBatchSize;
+    private final BackoffPolicy retryThrottledDeleteBackoffPolicy;
+
+    private final TimeValue getRegisterRetryDelay;
 
     S3BlobStore(
         S3Service service,
@@ -100,7 +108,8 @@ class S3BlobStore implements BlobStore {
         RepositoryMetadata repositoryMetadata,
         BigArrays bigArrays,
         ThreadPool threadPool,
-        S3RepositoriesMetrics s3RepositoriesMetrics
+        S3RepositoriesMetrics s3RepositoriesMetrics,
+        BackoffPolicy retryThrottledDeleteBackoffPolicy
     ) {
         this.service = service;
         this.bigArrays = bigArrays;
@@ -114,7 +123,8 @@ class S3BlobStore implements BlobStore {
         this.snapshotExecutor = threadPool.executor(ThreadPool.Names.SNAPSHOT);
         this.s3RepositoriesMetrics = s3RepositoriesMetrics;
         this.bulkDeletionBatchSize = S3Repository.DELETION_BATCH_SIZE_SETTING.get(repositoryMetadata.settings());
-
+        this.retryThrottledDeleteBackoffPolicy = retryThrottledDeleteBackoffPolicy;
+        this.getRegisterRetryDelay = S3Repository.GET_REGISTER_RETRY_DELAY.get(repositoryMetadata.settings());
     }
 
     RequestMetricCollector getMetricCollector(Operation operation, OperationPurpose purpose) {
@@ -133,26 +143,23 @@ class S3BlobStore implements BlobStore {
         return service.compareAndExchangeAntiContentionDelay;
     }
 
-    // metrics collector that ignores null responses that we interpret as the request not reaching the S3 endpoint due to a network
-    // issue
-    class IgnoreNoResponseMetricsCollector extends RequestMetricCollector {
+    /**
+     * A {@link RequestMetricCollector} that processes the metrics related to each API invocation attempt according to Elasticsearch's needs
+     */
+    class ElasticsearchS3MetricsCollector extends RequestMetricCollector {
 
-        final LongAdder counter = new LongAdder();
+        final LongAdder requests = new LongAdder();
+        final LongAdder operations = new LongAdder();
         private final Operation operation;
         private final Map<String, Object> attributes;
 
-        private IgnoreNoResponseMetricsCollector(Operation operation, OperationPurpose purpose) {
+        private ElasticsearchS3MetricsCollector(Operation operation, OperationPurpose purpose) {
             this.operation = operation;
-            this.attributes = Map.of(
-                "repo_type",
-                S3Repository.TYPE,
-                "repo_name",
-                repositoryMetadata.name(),
-                "operation",
-                operation.getKey(),
-                "purpose",
-                purpose.getKey()
-            );
+            this.attributes = RepositoriesMetrics.createAttributesMap(repositoryMetadata, purpose, operation.getKey());
+        }
+
+        BlobStoreActionStats getEndpointStats() {
+            return new BlobStoreActionStats(operations.sum(), requests.sum());
         }
 
         @Override
@@ -167,8 +174,9 @@ class S3BlobStore implements BlobStore {
             // For stats reported by API, do not collect stats for null response for BWC.
             // See https://github.com/elastic/elasticsearch/pull/71406
             // TODO Is this BWC really necessary?
+            // This behaviour needs to be updated, see https://elasticco.atlassian.net/browse/ES-10223
             if (response != null) {
-                counter.add(requestCount);
+                requests.add(requestCount);
             }
 
             // We collect all metrics regardless whether response is null
@@ -196,6 +204,7 @@ class S3BlobStore implements BlobStore {
             }
 
             s3RepositoriesMetrics.common().operationCounter().incrementBy(1, attributes);
+            operations.increment();
             if (numberOfAwsErrors == requestCount) {
                 s3RepositoriesMetrics.common().unsuccessfulOperationCounter().incrementBy(1, attributes);
             }
@@ -262,7 +271,8 @@ class S3BlobStore implements BlobStore {
     private static long getCountForMetric(TimingInfo info, AWSRequestMetrics.Field field) {
         var count = info.getCounter(field.name());
         if (count == null) {
-            if (field == AWSRequestMetrics.Field.RequestCount) {
+            // This can be null if the thread was interrupted
+            if (field == AWSRequestMetrics.Field.RequestCount && Thread.currentThread().isInterrupted() == false) {
                 final String message = "Expected request count to be tracked but found not count.";
                 assert false : message;
                 logger.warn(message);
@@ -331,58 +341,134 @@ class S3BlobStore implements BlobStore {
         return new S3BlobContainer(path, this);
     }
 
-    @Override
-    public void deleteBlobsIgnoringIfNotExists(OperationPurpose purpose, Iterator<String> blobNames) throws IOException {
+    private static class DeletionExceptions {
+        Exception exception = null;
+        private int count = 0;
+
+        void useOrMaybeSuppress(Exception e) {
+            if (count < MAX_DELETE_EXCEPTIONS) {
+                exception = ExceptionsHelper.useOrSuppress(exception, e);
+                count++;
+            }
+        }
+    }
+
+    void deleteBlobs(OperationPurpose purpose, Iterator<String> blobNames) throws IOException {
         if (blobNames.hasNext() == false) {
             return;
         }
 
         final List<String> partition = new ArrayList<>();
-        try (AmazonS3Reference clientReference = clientReference()) {
+        try {
             // S3 API only allows 1k blobs per delete so we split up the given blobs into requests of max. 1k deletes
-            final AtomicReference<Exception> aex = new AtomicReference<>();
+            final var deletionExceptions = new DeletionExceptions();
             blobNames.forEachRemaining(key -> {
                 partition.add(key);
                 if (partition.size() == bulkDeletionBatchSize) {
-                    deletePartition(purpose, clientReference, partition, aex);
+                    deletePartition(purpose, partition, deletionExceptions);
                     partition.clear();
                 }
             });
             if (partition.isEmpty() == false) {
-                deletePartition(purpose, clientReference, partition, aex);
+                deletePartition(purpose, partition, deletionExceptions);
             }
-            if (aex.get() != null) {
-                throw aex.get();
+            if (deletionExceptions.exception != null) {
+                throw deletionExceptions.exception;
             }
         } catch (Exception e) {
             throw new IOException("Failed to delete blobs " + partition.stream().limit(10).toList(), e);
         }
     }
 
-    private void deletePartition(
-        OperationPurpose purpose,
-        AmazonS3Reference clientReference,
-        List<String> partition,
-        AtomicReference<Exception> aex
-    ) {
-        try {
-            SocketAccess.doPrivilegedVoid(() -> clientReference.client().deleteObjects(bulkDelete(purpose, this, partition)));
-        } catch (MultiObjectDeleteException e) {
-            // We are sending quiet mode requests so we can't use the deleted keys entry on the exception and instead
-            // first remove all keys that were sent in the request and then add back those that ran into an exception.
-            logger.warn(
-                () -> format(
-                    "Failed to delete some blobs %s",
-                    e.getErrors().stream().map(err -> "[" + err.getKey() + "][" + err.getCode() + "][" + err.getMessage() + "]").toList()
-                ),
-                e
-            );
-            aex.set(ExceptionsHelper.useOrSuppress(aex.get(), e));
-        } catch (AmazonClientException e) {
-            // The AWS client threw any unexpected exception and did not execute the request at all so we do not
-            // remove any keys from the outstanding deletes set.
-            aex.set(ExceptionsHelper.useOrSuppress(aex.get(), e));
+    /**
+     * Delete one partition of a batch of blobs
+     *
+     * @param purpose The {@link OperationPurpose} of the deletion
+     * @param partition The list of blobs to delete
+     * @param deletionExceptions A holder for any exception(s) thrown during the deletion
+     */
+    private void deletePartition(OperationPurpose purpose, List<String> partition, DeletionExceptions deletionExceptions) {
+        final Iterator<TimeValue> retries = retryThrottledDeleteBackoffPolicy.iterator();
+        int retryCounter = 0;
+        while (true) {
+            try (AmazonS3Reference clientReference = clientReference()) {
+                SocketAccess.doPrivilegedVoid(() -> clientReference.client().deleteObjects(bulkDelete(purpose, this, partition)));
+                s3RepositoriesMetrics.retryDeletesHistogram().record(retryCounter);
+                return;
+            } catch (MultiObjectDeleteException e) {
+                // We are sending quiet mode requests so we can't use the deleted keys entry on the exception and instead
+                // first remove all keys that were sent in the request and then add back those that ran into an exception.
+                logger.warn(buildDeletionErrorMessage(e), e);
+                deletionExceptions.useOrMaybeSuppress(e);
+                return;
+            } catch (AmazonClientException e) {
+                if (shouldRetryDelete(purpose) && RetryUtils.isThrottlingException(e)) {
+                    // S3 is asking us to slow down. Pause for a bit and retry
+                    if (maybeDelayAndRetryDelete(retries)) {
+                        retryCounter++;
+                    } else {
+                        s3RepositoriesMetrics.retryDeletesHistogram().record(retryCounter);
+                        deletionExceptions.useOrMaybeSuppress(e);
+                        return;
+                    }
+                } else {
+                    // The AWS client threw any unexpected exception and did not execute the request at all so we do not
+                    // remove any keys from the outstanding deletes set.
+                    deletionExceptions.useOrMaybeSuppress(e);
+                    return;
+                }
+            }
         }
+    }
+
+    private String buildDeletionErrorMessage(MultiObjectDeleteException e) {
+        final var sb = new StringBuilder("Failed to delete some blobs ");
+        final var errors = e.getErrors();
+        for (int i = 0; i < errors.size() && i < MAX_DELETE_EXCEPTIONS; i++) {
+            final var err = errors.get(i);
+            sb.append("[").append(err.getKey()).append("][").append(err.getCode()).append("][").append(err.getMessage()).append("]");
+            if (i < errors.size() - 1) {
+                sb.append(",");
+            }
+        }
+        if (errors.size() > MAX_DELETE_EXCEPTIONS) {
+            sb.append("... (")
+                .append(errors.size())
+                .append(" in total, ")
+                .append(errors.size() - MAX_DELETE_EXCEPTIONS)
+                .append(" omitted)");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * If there are remaining retries, pause for the configured interval then return true
+     *
+     * @param retries The retries iterator
+     * @return true to try the deletion again, false otherwise
+     */
+    private boolean maybeDelayAndRetryDelete(Iterator<TimeValue> retries) {
+        if (retries.hasNext()) {
+            try {
+                Thread.sleep(retries.next().millis());
+                return true;
+            } catch (InterruptedException iex) {
+                Thread.currentThread().interrupt();
+                // If we're interrupted, record the exception and abort retries
+                logger.warn("Aborting tenacious snapshot delete retries due to interrupt");
+            }
+        } else {
+            logger.warn(
+                "Exceeded maximum tenacious snapshot delete retries, aborting. Using back-off policy "
+                    + retryThrottledDeleteBackoffPolicy
+                    + ", see the throttled_delete_retry.* S3 repository properties to configure the back-off parameters"
+            );
+        }
+        return false;
+    }
+
+    private boolean shouldRetryDelete(OperationPurpose operationPurpose) {
+        return operationPurpose == OperationPurpose.SNAPSHOT_DATA || operationPurpose == OperationPurpose.SNAPSHOT_METADATA;
     }
 
     private static DeleteObjectsRequest bulkDelete(OperationPurpose purpose, S3BlobStore blobStore, List<String> blobs) {
@@ -395,11 +481,11 @@ class S3BlobStore implements BlobStore {
 
     @Override
     public void close() throws IOException {
-        this.service.close();
+        service.onBlobStoreClose();
     }
 
     @Override
-    public Map<String, Long> stats() {
+    public Map<String, BlobStoreActionStats> stats() {
         return statsCollectors.statsMap(service.isStateless);
     }
 
@@ -414,6 +500,10 @@ class S3BlobStore implements BlobStore {
 
     public StorageClass getStorageClass() {
         return storageClass;
+    }
+
+    public TimeValue getGetRegisterRetryDelay() {
+        return getRegisterRetryDelay;
     }
 
     public static StorageClass initStorageClass(String storageClass) {
@@ -493,26 +583,31 @@ class S3BlobStore implements BlobStore {
     }
 
     class StatsCollectors {
-        final Map<StatsKey, IgnoreNoResponseMetricsCollector> collectors = new ConcurrentHashMap<>();
+        final Map<StatsKey, ElasticsearchS3MetricsCollector> collectors = new ConcurrentHashMap<>();
 
         RequestMetricCollector getMetricCollector(Operation operation, OperationPurpose purpose) {
             return collectors.computeIfAbsent(new StatsKey(operation, purpose), k -> buildMetricCollector(k.operation(), k.purpose()));
         }
 
-        Map<String, Long> statsMap(boolean isStateless) {
+        Map<String, BlobStoreActionStats> statsMap(boolean isStateless) {
             if (isStateless) {
                 return collectors.entrySet()
                     .stream()
-                    .collect(Collectors.toUnmodifiableMap(entry -> entry.getKey().toString(), entry -> entry.getValue().counter.sum()));
+                    .collect(
+                        Collectors.toUnmodifiableMap(entry -> entry.getKey().toString(), entry -> entry.getValue().getEndpointStats())
+                    );
             } else {
-                final Map<String, Long> m = Arrays.stream(Operation.values()).collect(Collectors.toMap(Operation::getKey, e -> 0L));
-                collectors.forEach((sk, v) -> m.compute(sk.operation().getKey(), (k, c) -> Objects.requireNonNull(c) + v.counter.sum()));
+                final Map<String, BlobStoreActionStats> m = Arrays.stream(Operation.values())
+                    .collect(Collectors.toMap(Operation::getKey, e -> BlobStoreActionStats.ZERO));
+                collectors.forEach(
+                    (sk, v) -> m.compute(sk.operation().getKey(), (k, c) -> Objects.requireNonNull(c).add(v.getEndpointStats()))
+                );
                 return Map.copyOf(m);
             }
         }
 
-        IgnoreNoResponseMetricsCollector buildMetricCollector(Operation operation, OperationPurpose purpose) {
-            return new IgnoreNoResponseMetricsCollector(operation, purpose);
+        ElasticsearchS3MetricsCollector buildMetricCollector(Operation operation, OperationPurpose purpose) {
+            return new ElasticsearchS3MetricsCollector(operation, purpose);
         }
     }
 

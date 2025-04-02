@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.action.admin.cluster.node.tasks;
 
@@ -40,6 +41,7 @@ import org.elasticsearch.health.node.selection.HealthNode;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.persistent.PersistentTasksCustomMetadata;
 import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.search.SearchService;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.tasks.RemovedTaskListener;
 import org.elasticsearch.tasks.Task;
@@ -141,7 +143,7 @@ public class TasksIT extends ESIntegTestCase {
         registerTaskManagerListeners(TransportClusterHealthAction.NAME);
 
         // First run the health on the master node - should produce only one task on the master node
-        internalCluster().masterClient().admin().cluster().prepareHealth().get();
+        internalCluster().masterClient().admin().cluster().prepareHealth(TEST_REQUEST_TIMEOUT).get();
         assertEquals(1, numberOfEvents(TransportClusterHealthAction.NAME, Tuple::v1)); // counting only registration events
         // counting only unregistration events
         // When checking unregistration events there might be some delay since receiving the response from the cluster doesn't
@@ -151,7 +153,7 @@ public class TasksIT extends ESIntegTestCase {
         resetTaskManagerListeners(TransportClusterHealthAction.NAME);
 
         // Now run the health on a non-master node - should produce one task on master and one task on another node
-        internalCluster().nonMasterClient().admin().cluster().prepareHealth().get();
+        internalCluster().nonMasterClient().admin().cluster().prepareHealth(TEST_REQUEST_TIMEOUT).get();
         assertEquals(2, numberOfEvents(TransportClusterHealthAction.NAME, Tuple::v1)); // counting only registration events
         // counting only unregistration events
         assertBusy(() -> assertEquals(2, numberOfEvents(TransportClusterHealthAction.NAME, event -> event.v1() == false)));
@@ -351,6 +353,8 @@ public class TasksIT extends ESIntegTestCase {
     }
 
     public void testSearchTaskDescriptions() {
+        // TODO: enhance this test to also check the tasks created by batched query execution
+        updateClusterSettings(Settings.builder().put(SearchService.BATCHED_QUERY_PHASE.getKey(), false));
         registerTaskManagerListeners(TransportSearchAction.TYPE.name());  // main task
         registerTaskManagerListeners(TransportSearchAction.TYPE.name() + "[*]");  // shard task
         createIndex("test");
@@ -397,7 +401,7 @@ public class TasksIT extends ESIntegTestCase {
             // assert that all task descriptions have non-zero length
             assertThat(taskInfo.description().length(), greaterThan(0));
         }
-
+        updateClusterSettings(Settings.builder().putNull(SearchService.BATCHED_QUERY_PHASE.getKey()));
     }
 
     public void testSearchTaskHeaderLimit() {
@@ -778,17 +782,13 @@ public class TasksIT extends ESIntegTestCase {
         assertNoFailures(indicesAdmin().prepareRefresh(TaskResultsService.TASK_INDEX).get());
 
         assertHitCount(
+            1L,
             prepareSearch(TaskResultsService.TASK_INDEX).setSource(
                 SearchSourceBuilder.searchSource().query(QueryBuilders.termQuery("task.action", taskInfo.action()))
             ),
-            1L
-        );
-
-        assertHitCount(
             prepareSearch(TaskResultsService.TASK_INDEX).setSource(
                 SearchSourceBuilder.searchSource().query(QueryBuilders.termQuery("task.node", taskInfo.taskId().getNodeId()))
-            ),
-            1L
+            )
         );
 
         GetTaskResponse getResponse = expectFinishedTask(taskId);

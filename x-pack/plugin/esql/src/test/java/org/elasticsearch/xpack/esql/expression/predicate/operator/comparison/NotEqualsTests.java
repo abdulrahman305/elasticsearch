@@ -115,7 +115,6 @@ public class NotEqualsTests extends AbstractScalarFunctionTestCase {
             )
         );
         // Datetime
-        // TODO: I'm surprised this passes. Shouldn't there be a cast from DateTime to Long?
         suppliers.addAll(
             TestCaseSupplier.forBinaryNotCasting(
                 "NotEqualsLongsEvaluator",
@@ -129,6 +128,50 @@ public class NotEqualsTests extends AbstractScalarFunctionTestCase {
                 false
             )
         );
+        // Datenanos
+        suppliers.addAll(
+            TestCaseSupplier.forBinaryNotCasting(
+                "NotEqualsLongsEvaluator",
+                "lhs",
+                "rhs",
+                (l, r) -> false == l.equals(r),
+                DataType.BOOLEAN,
+                TestCaseSupplier.dateNanosCases(),
+                TestCaseSupplier.dateNanosCases(),
+                List.of(),
+                false
+            )
+        );
+
+        // nanoseconds to milliseconds. NB: these have different evaluator names depending on the direction
+        suppliers.addAll(
+            TestCaseSupplier.forBinaryNotCasting(
+                "NotEqualsNanosMillisEvaluator",
+                "lhs",
+                "rhs",
+                (l, r) -> false == l.equals(r),
+                DataType.BOOLEAN,
+                TestCaseSupplier.dateNanosCases(),
+                TestCaseSupplier.dateCases(),
+                List.of(),
+                false
+            )
+        );
+
+        suppliers.addAll(
+            TestCaseSupplier.forBinaryNotCasting(
+                "NotEqualsMillisNanosEvaluator",
+                "lhs",
+                "rhs",
+                (l, r) -> false == l.equals(r),
+                DataType.BOOLEAN,
+                TestCaseSupplier.dateCases(),
+                TestCaseSupplier.dateNanosCases(),
+                List.of(),
+                false
+            )
+        );
+
         suppliers.addAll(
             TestCaseSupplier.stringCases(
                 (l, r) -> false == l.equals(r),
@@ -189,17 +232,9 @@ public class NotEqualsTests extends AbstractScalarFunctionTestCase {
                 false
             )
         );
-        return parameterSuppliersFromTypedData(
-            errorsForCasesWithoutExamples(
-                anyNullIsNull(true, suppliers),
-                (o, v, t) -> AbstractScalarFunctionTestCase.errorMessageStringForBinaryOperators(o, v, t, (l, p) -> typeErrorString)
-            )
-        );
-    }
 
-    private static String typeErrorString =
-        "boolean, cartesian_point, cartesian_shape, datetime, double, geo_point, geo_shape, integer, ip, keyword, long, text, "
-            + "unsigned_long or version";
+        return parameterSuppliersFromTypedDataWithDefaultChecksNoErrors(true, suppliers);
+    }
 
     @Override
     protected Expression build(Source source, List<Expression> args) {

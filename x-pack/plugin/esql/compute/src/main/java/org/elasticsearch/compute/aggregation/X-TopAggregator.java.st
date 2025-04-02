@@ -7,8 +7,11 @@
 
 package org.elasticsearch.compute.aggregation;
 
-$if(Ip)$
+$if(BytesRef || Ip)$
 import org.apache.lucene.util.BytesRef;
+$endif$
+$if(BytesRef)$
+import org.elasticsearch.common.breaker.CircuitBreaker;
 $endif$
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.compute.ann.Aggregator;
@@ -25,7 +28,6 @@ import org.elasticsearch.compute.data.$Type$Block;
 $endif$
 import org.elasticsearch.compute.data.sort.$Name$BucketedSort;
 import org.elasticsearch.compute.operator.DriverContext;
-import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.search.sort.SortOrder;
 
@@ -49,7 +51,7 @@ class Top$Name$Aggregator {
     public static void combineIntermediate(SingleState state, $Type$Block values) {
         int start = values.getFirstValueIndex(0);
         int end = start + values.getValueCount(0);
-$if(Ip)$
+$if(BytesRef || Ip)$
         var scratch = new BytesRef();
         for (int i = start; i < end; i++) {
             combine(state, values.get$Type$(i, scratch));
@@ -76,7 +78,7 @@ $endif$
     public static void combineIntermediate(GroupingState state, int groupId, $Type$Block values, int valuesPosition) {
         int start = values.getFirstValueIndex(valuesPosition);
         int end = start + values.getValueCount(valuesPosition);
-$if(Ip)$
+$if(BytesRef || Ip)$
         var scratch = new BytesRef();
         for (int i = start; i < end; i++) {
             combine(state, groupId, values.get$Type$(i, scratch));
@@ -96,11 +98,17 @@ $endif$
         return state.toBlock(driverContext.blockFactory(), selected);
     }
 
-    public static class GroupingState implements Releasable {
+    public static class GroupingState implements GroupingAggregatorState {
         private final $Name$BucketedSort sort;
 
         private GroupingState(BigArrays bigArrays, int limit, boolean ascending) {
+$if(BytesRef)$
+            // TODO pass the breaker in from the DriverContext
+            CircuitBreaker breaker = bigArrays.breakerService().getBreaker(CircuitBreaker.REQUEST);
+            this.sort = new BytesRefBucketedSort(breaker, "top", bigArrays, ascending ? SortOrder.ASC : SortOrder.DESC, limit);
+$else$
             this.sort = new $Name$BucketedSort(bigArrays, ascending ? SortOrder.ASC : SortOrder.DESC, limit);
+$endif$
         }
 
         public void add(int groupId, $type$ value) {
@@ -111,7 +119,8 @@ $endif$
             sort.merge(groupId, other.sort, otherGroupId);
         }
 
-        void toIntermediate(Block[] blocks, int offset, IntVector selected, DriverContext driverContext) {
+        @Override
+        public void toIntermediate(Block[] blocks, int offset, IntVector selected, DriverContext driverContext) {
             blocks[offset] = toBlock(driverContext.blockFactory(), selected);
         }
 
@@ -119,7 +128,8 @@ $endif$
             return sort.toBlock(blockFactory, selected);
         }
 
-        void enableGroupIdTracking(SeenGroupIds seen) {
+        @Override
+        public void enableGroupIdTracking(SeenGroupIds seen) {
             // we figure out seen values from nulls on the values block
         }
 
@@ -129,7 +139,7 @@ $endif$
         }
     }
 
-    public static class SingleState implements Releasable {
+    public static class SingleState implements AggregatorState {
         private final GroupingState internalState;
 
         private SingleState(BigArrays bigArrays, int limit, boolean ascending) {
@@ -144,7 +154,8 @@ $endif$
             internalState.merge(0, other, 0);
         }
 
-        void toIntermediate(Block[] blocks, int offset, DriverContext driverContext) {
+        @Override
+        public void toIntermediate(Block[] blocks, int offset, DriverContext driverContext) {
             blocks[offset] = toBlock(driverContext.blockFactory());
         }
 

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.transport;
@@ -21,7 +22,6 @@ import org.elasticsearch.common.network.NetworkService;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.PageCacheRecycler;
 import org.elasticsearch.core.Releasable;
-import org.elasticsearch.core.SuppressForbidden;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.index.IndexVersion;
 import org.elasticsearch.index.IndexVersions;
@@ -185,9 +185,10 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             )
         ) {
             assertThat(
-                asInstanceOf(
+                safeAwaitFailure(
                     IllegalStateException.class,
-                    safeAwaitFailure(DiscoveryNode.class, listener -> transportServiceA.handshake(connection, timeout, listener))
+                    DiscoveryNode.class,
+                    listener -> transportServiceA.handshake(connection, timeout, listener)
                 ).getMessage(),
                 containsString(
                     "handshake with [" + discoveryNode + "] failed: remote cluster name [b] does not match local cluster name [a]"
@@ -230,9 +231,10 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             )
         ) {
             assertThat(
-                asInstanceOf(
+                safeAwaitFailure(
                     IllegalStateException.class,
-                    safeAwaitFailure(DiscoveryNode.class, listener -> transportServiceA.handshake(connection, timeout, listener))
+                    DiscoveryNode.class,
+                    listener -> transportServiceA.handshake(connection, timeout, listener)
                 ).getMessage(),
                 containsString(
                     "handshake with ["
@@ -302,12 +304,10 @@ public class TransportServiceHandshakeTests extends ESTestCase {
             .version(transportServiceB.getLocalNode().getVersionInformation())
             .build();
         assertThat(
-            asInstanceOf(
+            safeAwaitFailure(
                 ConnectTransportException.class,
-                safeAwaitFailure(
-                    Releasable.class,
-                    listener -> transportServiceA.connectToNode(discoveryNode, TestProfiles.LIGHT_PROFILE, listener)
-                )
+                Releasable.class,
+                listener -> transportServiceA.connectToNode(discoveryNode, TestProfiles.LIGHT_PROFILE, listener)
             ).getMessage(),
             allOf(
                 containsString("Connecting to [" + discoveryNode.getAddress() + "] failed"),
@@ -315,8 +315,7 @@ public class TransportServiceHandshakeTests extends ESTestCase {
                 containsString("found [" + transportServiceB.getLocalNode().descriptionWithoutAttributes() + "] instead"),
                 containsString("Ensure that each node has its own distinct publish address"),
                 containsString("routed to the correct node"),
-                containsString("https://www.elastic.co/guide/en/elasticsearch/reference/"),
-                containsString("modules-network.html")
+                containsString("https://www.elastic.co/docs/reference/elasticsearch/configuration-reference/networking-settings")
             )
         );
         assertFalse(transportServiceA.nodeConnected(discoveryNode));
@@ -359,9 +358,10 @@ public class TransportServiceHandshakeTests extends ESTestCase {
         ) {
             assertThat(
                 ExceptionsHelper.unwrap(
-                    asInstanceOf(
+                    safeAwaitFailure(
                         TransportSerializationException.class,
-                        safeAwaitFailure(DiscoveryNode.class, listener -> transportServiceA.handshake(connection, timeout, listener))
+                        DiscoveryNode.class,
+                        listener -> transportServiceA.handshake(connection, timeout, listener)
                     ),
                     IllegalArgumentException.class
                 ).getMessage(),
@@ -371,39 +371,32 @@ public class TransportServiceHandshakeTests extends ESTestCase {
         assertFalse(transportServiceA.nodeConnected(discoveryNode));
     }
 
-    @SuppressForbidden(reason = "Sets property for testing")
     public void testAcceptsMismatchedServerlessBuildHash() {
         assumeTrue("Current build needs to be a snapshot", Build.current().isSnapshot());
-        assumeTrue("Security manager needs to be disabled", System.getSecurityManager() == null);
-        System.setProperty("es.serverless", Boolean.TRUE.toString());   // security manager blocks this
-        try {
-            final DisruptingTransportInterceptor transportInterceptorA = new DisruptingTransportInterceptor();
-            final DisruptingTransportInterceptor transportInterceptorB = new DisruptingTransportInterceptor();
-            transportInterceptorA.setModifyBuildHash(true);
-            transportInterceptorB.setModifyBuildHash(true);
-            final Settings settings = Settings.builder()
-                .put("cluster.name", "a")
-                .put(IGNORE_DESERIALIZATION_ERRORS_SETTING.getKey(), true) // suppress assertions to test production error-handling
-                .build();
-            final TransportService transportServiceA = startServices(
-                "TS_A",
-                settings,
-                TransportVersion.current(),
-                VersionInformation.CURRENT,
-                transportInterceptorA
-            );
-            final TransportService transportServiceB = startServices(
-                "TS_B",
-                settings,
-                TransportVersion.current(),
-                VersionInformation.CURRENT,
-                transportInterceptorB
-            );
-            AbstractSimpleTransportTestCase.connectToNode(transportServiceA, transportServiceB.getLocalNode(), TestProfiles.LIGHT_PROFILE);
-            assertTrue(transportServiceA.nodeConnected(transportServiceB.getLocalNode()));
-        } finally {
-            System.clearProperty("es.serverless");
-        }
+        final DisruptingTransportInterceptor transportInterceptorA = new DisruptingTransportInterceptor();
+        final DisruptingTransportInterceptor transportInterceptorB = new DisruptingTransportInterceptor();
+        transportInterceptorA.setModifyBuildHash(true);
+        transportInterceptorB.setModifyBuildHash(true);
+        final Settings settings = Settings.builder()
+            .put("cluster.name", "a")
+            .put(IGNORE_DESERIALIZATION_ERRORS_SETTING.getKey(), true) // suppress assertions to test production error-handling
+            .build();
+        final TransportService transportServiceA = startServices(
+            "TS_A",
+            settings,
+            TransportVersion.current(),
+            VersionInformation.CURRENT,
+            transportInterceptorA
+        );
+        final TransportService transportServiceB = startServices(
+            "TS_B",
+            settings,
+            TransportVersion.current(),
+            VersionInformation.CURRENT,
+            transportInterceptorB
+        );
+        AbstractSimpleTransportTestCase.connectToNode(transportServiceA, transportServiceB.getLocalNode(), TestProfiles.LIGHT_PROFILE);
+        assertTrue(transportServiceA.nodeConnected(transportServiceB.getLocalNode()));
     }
 
     public void testAcceptsMismatchedBuildHashFromDifferentVersion() {

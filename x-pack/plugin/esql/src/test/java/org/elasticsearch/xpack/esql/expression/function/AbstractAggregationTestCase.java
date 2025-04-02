@@ -11,8 +11,10 @@ import org.elasticsearch.compute.aggregation.Aggregator;
 import org.elasticsearch.compute.aggregation.AggregatorFunctionSupplier;
 import org.elasticsearch.compute.aggregation.AggregatorMode;
 import org.elasticsearch.compute.aggregation.GroupingAggregator;
+import org.elasticsearch.compute.aggregation.GroupingAggregatorFunction;
 import org.elasticsearch.compute.aggregation.SeenGroupIds;
 import org.elasticsearch.compute.data.Block;
+import org.elasticsearch.compute.data.BooleanVector;
 import org.elasticsearch.compute.data.ElementType;
 import org.elasticsearch.compute.data.IntBlock;
 import org.elasticsearch.compute.data.IntVector;
@@ -20,12 +22,13 @@ import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
+import org.elasticsearch.xpack.esql.core.expression.FoldContext;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.util.NumericUtils;
 import org.elasticsearch.xpack.esql.expression.SurrogateExpression;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
-import org.elasticsearch.xpack.esql.optimizer.FoldNull;
+import org.elasticsearch.xpack.esql.optimizer.rules.logical.FoldNull;
 import org.elasticsearch.xpack.esql.planner.PlannerUtils;
 import org.elasticsearch.xpack.esql.planner.ToAggregator;
 
@@ -38,6 +41,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.elasticsearch.compute.data.BlockUtils.toJavaObject;
+import static org.elasticsearch.xpack.esql.EsqlTestUtils.unboundLogicalOptimizerContext;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
@@ -57,7 +61,7 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
      *     Use if possible, as this method may get updated with new checks in the future.
      * </p>
      */
-    protected static Iterable<Object[]> parameterSuppliersFromTypedDataWithDefaultChecks(
+    protected static Iterable<Object[]> parameterSuppliersFromTypedDataWithDefaultChecksNoErrors(
         List<TestCaseSupplier> suppliers,
         boolean entirelyNullPreservesType,
         PositionalErrorMessageSupplier positionalErrorMessageSupplier
@@ -70,13 +74,24 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
         );
     }
 
-    // TODO: Remove and migrate everything to the method with all the parameters
     /**
-     * @deprecated Use {@link #parameterSuppliersFromTypedDataWithDefaultChecks(List, boolean, PositionalErrorMessageSupplier)} instead.
-     * This method doesn't add all the default checks.
+     * Converts a list of test cases into a list of parameter suppliers.
+     * Also, adds a default set of extra test cases.
+     * <p>
+     *     Use if possible, as this method may get updated with new checks in the future.
+     * </p>
+     *
+     * @param entirelyNullPreservesType See {@link #anyNullIsNull(boolean, List)}
      */
-    @Deprecated
-    protected static Iterable<Object[]> parameterSuppliersFromTypedDataWithDefaultChecks(List<TestCaseSupplier> suppliers) {
+    protected static Iterable<Object[]> parameterSuppliersFromTypedDataWithDefaultChecksNoErrors(
+        // TODO remove after removing parameterSuppliersFromTypedDataWithDefaultChecks rename this to that.
+        List<TestCaseSupplier> suppliers,
+        boolean entirelyNullPreservesType
+    ) {
+        return parameterSuppliersFromTypedData(anyNullIsNull(entirelyNullPreservesType, randomizeBytesRefsOffset(suppliers)));
+    }
+
+    protected static Iterable<Object[]> parameterSuppliersFromTypedDataWithDefaultChecksNoErrors(List<TestCaseSupplier> suppliers) {
         return parameterSuppliersFromTypedData(withNoRowsExpectingNull(randomizeBytesRefsOffset(suppliers)));
     }
 
@@ -105,9 +120,12 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
                         testCase.expectedType(),
                         nullValue(),
                         null,
+                        null,
                         testCase.getExpectedTypeError(),
                         null,
-                        null
+                        null,
+                        null,
+                        testCase.canBuildEvaluator()
                     );
                 }));
             }
@@ -147,8 +165,10 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
         Object result;
         try (var aggregator = aggregator(expression, initialInputChannels(), AggregatorMode.SINGLE)) {
             for (Page inputPage : rows(testCase.getMultiRowFields())) {
-                try {
-                    aggregator.processPage(inputPage);
+                try (
+                    BooleanVector noMasking = driverContext().blockFactory().newConstantBooleanVector(true, inputPage.getPositionCount())
+                ) {
+                    aggregator.processPage(inputPage, noMasking);
                 } finally {
                     inputPage.releaseBlocks();
                 }
@@ -157,15 +177,7 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
             result = extractResultFromAggregator(aggregator, PlannerUtils.toElementType(testCase.expectedType()));
         }
 
-        assertThat(result, not(equalTo(Double.NaN)));
-        assert testCase.getMatcher().matches(Double.POSITIVE_INFINITY) == false;
-        assertThat(result, not(equalTo(Double.POSITIVE_INFINITY)));
-        assert testCase.getMatcher().matches(Double.NEGATIVE_INFINITY) == false;
-        assertThat(result, not(equalTo(Double.NEGATIVE_INFINITY)));
-        assertThat(result, testCase.getMatcher());
-        if (testCase.getExpectedWarnings() != null) {
-            assertWarnings(testCase.getExpectedWarnings());
-        }
+        assertTestCaseResultAndWarnings(result);
     }
 
     private void aggregateGroupingSingleMode(Expression expression) {
@@ -214,8 +226,10 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
             intermediateBlocks = new Block[intermediateBlockOffset + intermediateStates + intermediateBlockExtraSize];
 
             for (Page inputPage : rows(testCase.getMultiRowFields())) {
-                try {
-                    aggregator.processPage(inputPage);
+                try (
+                    BooleanVector noMasking = driverContext().blockFactory().newConstantBooleanVector(true, inputPage.getPositionCount())
+                ) {
+                    aggregator.processPage(inputPage, noMasking);
                 } finally {
                     inputPage.releaseBlocks();
                 }
@@ -244,9 +258,9 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
             )
         ) {
             Page inputPage = new Page(intermediateBlocks);
-            try {
+            try (BooleanVector noMasking = driverContext().blockFactory().newConstantBooleanVector(true, inputPage.getPositionCount())) {
                 if (inputPage.getPositionCount() > 0) {
-                    aggregator.processPage(inputPage);
+                    aggregator.processPage(inputPage, noMasking);
                 }
             } finally {
                 inputPage.releaseBlocks();
@@ -255,59 +269,46 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
             result = extractResultFromAggregator(aggregator, PlannerUtils.toElementType(testCase.expectedType()));
         }
 
-        assertThat(result, not(equalTo(Double.NaN)));
-        assert testCase.getMatcher().matches(Double.POSITIVE_INFINITY) == false;
-        assertThat(result, not(equalTo(Double.POSITIVE_INFINITY)));
-        assert testCase.getMatcher().matches(Double.NEGATIVE_INFINITY) == false;
-        assertThat(result, not(equalTo(Double.NEGATIVE_INFINITY)));
-        assertThat(result, testCase.getMatcher());
-        if (testCase.getExpectedWarnings() != null) {
-            assertWarnings(testCase.getExpectedWarnings());
-        }
+        assertTestCaseResultAndWarnings(result);
     }
 
     private void evaluate(Expression evaluableExpression) {
         assertTrue(evaluableExpression.foldable());
 
         if (testCase.foldingExceptionClass() != null) {
-            Throwable t = expectThrows(testCase.foldingExceptionClass(), evaluableExpression::fold);
+            Throwable t = expectThrows(testCase.foldingExceptionClass(), () -> evaluableExpression.fold(FoldContext.small()));
             assertThat(t.getMessage(), equalTo(testCase.foldingExceptionMessage()));
             return;
         }
 
-        Object result = evaluableExpression.fold();
+        Object result = evaluableExpression.fold(FoldContext.small());
         // Decode unsigned longs into BigIntegers
         if (testCase.expectedType() == DataType.UNSIGNED_LONG && result != null) {
             result = NumericUtils.unsignedLongAsBigInteger((Long) result);
         }
-        assertThat(result, not(equalTo(Double.NaN)));
-        assert testCase.getMatcher().matches(Double.POSITIVE_INFINITY) == false;
-        assertThat(result, not(equalTo(Double.POSITIVE_INFINITY)));
-        assert testCase.getMatcher().matches(Double.NEGATIVE_INFINITY) == false;
-        assertThat(result, not(equalTo(Double.NEGATIVE_INFINITY)));
-        assertThat(result, testCase.getMatcher());
-        if (testCase.getExpectedWarnings() != null) {
-            assertWarnings(testCase.getExpectedWarnings());
-        }
+        assertTestCaseResultAndWarnings(result);
     }
 
     private void resolveExpression(Expression expression, Consumer<Expression> onAggregator, Consumer<Expression> onEvaluableExpression) {
-        logger.info(
-            "Test Values: " + testCase.getData().stream().map(TestCaseSupplier.TypedData::toString).collect(Collectors.joining(","))
-        );
+        String valuesString = testCase.getData().stream().map(TestCaseSupplier.TypedData::toString).collect(Collectors.joining(","));
+        if (valuesString.length() > 200) {
+            valuesString = valuesString.substring(0, 200) + "...";
+        }
+        logger.info("Test Values: " + valuesString);
         if (testCase.getExpectedTypeError() != null) {
             assertTypeResolutionFailure(expression);
             return;
         }
         expression = resolveSurrogates(expression);
 
+        // As expressions may be composed of multiple functions, we need to fold nulls bottom-up
+        expression = expression.transformUp(e -> new FoldNull().rule(e, unboundLogicalOptimizerContext()));
+        assertThat(expression.dataType(), equalTo(testCase.expectedType()));
+
         Expression.TypeResolution resolution = expression.typeResolved();
         if (resolution.unresolved()) {
             throw new AssertionError("expected resolved " + resolution.message());
         }
-
-        expression = new FoldNull().rule(expression);
-        assertThat(expression.dataType(), equalTo(testCase.expectedType()));
 
         assumeTrue(
             "Surrogate expression with non-trivial children cannot be evaluated",
@@ -409,15 +410,15 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
     }
 
     private Aggregator aggregator(Expression expression, List<Integer> inputChannels, AggregatorMode mode) {
-        AggregatorFunctionSupplier aggregatorFunctionSupplier = ((ToAggregator) expression).supplier(inputChannels);
+        AggregatorFunctionSupplier aggregatorFunctionSupplier = ((ToAggregator) expression).supplier();
 
-        return new Aggregator(aggregatorFunctionSupplier.aggregator(driverContext()), mode);
+        return new Aggregator(aggregatorFunctionSupplier.aggregator(driverContext(), inputChannels), mode);
     }
 
     private GroupingAggregator groupingAggregator(Expression expression, List<Integer> inputChannels, AggregatorMode mode) {
-        AggregatorFunctionSupplier aggregatorFunctionSupplier = ((ToAggregator) expression).supplier(inputChannels);
+        AggregatorFunctionSupplier aggregatorFunctionSupplier = ((ToAggregator) expression).supplier();
 
-        return new GroupingAggregator(aggregatorFunctionSupplier.groupingAggregator(driverContext()), mode);
+        return new GroupingAggregator(aggregatorFunctionSupplier.groupingAggregator(driverContext(), inputChannels), mode);
     }
 
     /**
@@ -452,22 +453,26 @@ public abstract class AbstractAggregationTestCase extends AbstractFunctionTestCa
         for (int currentGroupOffset = 0; currentGroupOffset < groupCount;) {
             int groupSliceRemainingSize = Math.min(groupSliceSize, groupCount - currentGroupOffset);
             var seenGroupIds = new SeenGroupIds.Range(0, allValuesNull ? 0 : currentGroupOffset + groupSliceRemainingSize);
-            var addInput = aggregator.prepareProcessPage(seenGroupIds, inputPage);
+            try (GroupingAggregatorFunction.AddInput addInput = aggregator.prepareProcessPage(seenGroupIds, inputPage)) {
+                var positionCount = inputPage.getPositionCount();
+                var dataSliceSize = 1;
+                // Divide data in chunks
+                for (int currentDataOffset = 0; currentDataOffset < positionCount;) {
+                    int dataSliceRemainingSize = Math.min(dataSliceSize, positionCount - currentDataOffset);
+                    try (
+                        var groups = makeGroupsVector(
+                            currentGroupOffset,
+                            currentGroupOffset + groupSliceRemainingSize,
+                            dataSliceRemainingSize
+                        )
+                    ) {
+                        addInput.add(currentDataOffset, groups);
+                    }
 
-            var positionCount = inputPage.getPositionCount();
-            var dataSliceSize = 1;
-            // Divide data in chunks
-            for (int currentDataOffset = 0; currentDataOffset < positionCount;) {
-                int dataSliceRemainingSize = Math.min(dataSliceSize, positionCount - currentDataOffset);
-                try (
-                    var groups = makeGroupsVector(currentGroupOffset, currentGroupOffset + groupSliceRemainingSize, dataSliceRemainingSize)
-                ) {
-                    addInput.add(currentDataOffset, groups);
-                }
-
-                currentDataOffset += dataSliceSize;
-                if (positionCount > currentDataOffset) {
-                    dataSliceSize = randomIntBetween(1, Math.min(100, positionCount - currentDataOffset));
+                    currentDataOffset += dataSliceSize;
+                    if (positionCount > currentDataOffset) {
+                        dataSliceSize = randomIntBetween(1, Math.min(100, positionCount - currentDataOffset));
+                    }
                 }
             }
 

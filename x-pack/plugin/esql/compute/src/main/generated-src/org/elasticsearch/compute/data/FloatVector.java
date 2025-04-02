@@ -17,7 +17,7 @@ import java.io.IOException;
 
 /**
  * Vector that stores float values.
- * This class is generated. Do not edit it.
+ * This class is generated. Edit {@code X-Vector.java.st} instead.
  */
 public sealed interface FloatVector extends Vector permits ConstantFloatVector, FloatArrayVector, FloatBigArrayVector, ConstantNullVector {
 
@@ -28,6 +28,9 @@ public sealed interface FloatVector extends Vector permits ConstantFloatVector, 
 
     @Override
     FloatVector filter(int... positions);
+
+    @Override
+    FloatBlock keepMask(BooleanVector mask);
 
     @Override
     ReleasableIterator<? extends FloatBlock> lookup(IntBlock positions, ByteSizeValue targetBlockSize);

@@ -7,11 +7,13 @@
 
 package org.elasticsearch.xpack.esql.core.util;
 
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.core.CheckedFunction;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.NameId;
 import org.elasticsearch.xpack.esql.core.tree.Source;
+import org.elasticsearch.xpack.esql.core.type.EsField;
 
 import java.io.IOException;
 
@@ -44,4 +46,17 @@ public interface PlanStreamInput {
      * @throws IOException
      */
     <A extends Attribute> A readAttributeWithCache(CheckedFunction<StreamInput, A, IOException> constructor) throws IOException;
+
+    <A extends EsField> A readEsFieldWithCache() throws IOException;
+
+    String readCachedString() throws IOException;
+
+    static String readCachedStringWithVersionCheck(StreamInput planStreamInput) throws IOException {
+        if (planStreamInput.getTransportVersion().before(TransportVersions.V_8_16_0)) {
+            return planStreamInput.readString();
+        }
+        return ((PlanStreamInput) planStreamInput).readCachedString();
+    }
+
+    String readOptionalCachedString() throws IOException;
 }

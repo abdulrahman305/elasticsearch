@@ -17,6 +17,7 @@ import org.elasticsearch.action.fieldcaps.FieldCapabilitiesIndexResponse;
 import org.elasticsearch.action.fieldcaps.FieldCapabilitiesRequest;
 import org.elasticsearch.action.fieldcaps.FieldCapabilitiesResponse;
 import org.elasticsearch.action.fieldcaps.IndexFieldCapabilities;
+import org.elasticsearch.action.fieldcaps.IndexFieldCapabilitiesBuilder;
 import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.client.internal.FilterClient;
 import org.elasticsearch.cluster.ClusterName;
@@ -26,6 +27,7 @@ import org.elasticsearch.cluster.node.VersionInformation;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.client.NoOpClient;
 import org.elasticsearch.test.transport.MockTransportService;
@@ -445,16 +447,16 @@ public class EnrichPolicyResolverTests extends ESTestCase {
         }
 
         @Override
-        protected Transport.Connection getRemoteConnection(String remoteCluster) {
+        protected void getRemoteConnection(String remoteCluster, ActionListener<Transport.Connection> listener) {
             assertThat("Must only called on the local cluster", cluster, equalTo(LOCAL_CLUSTER_GROUP_KEY));
-            return transports.get("").getConnection(transports.get(remoteCluster).getLocalDiscoNode());
+            listener.onResponse(transports.get("").getConnection(transports.get(remoteCluster).getLocalNode()));
         }
 
         static ClusterService mockClusterService(Map<String, EnrichPolicy> policies) {
             ClusterService clusterService = mock(ClusterService.class);
             EnrichMetadata enrichMetadata = new EnrichMetadata(policies);
             ClusterState state = ClusterState.builder(new ClusterName("test"))
-                .metadata(Metadata.builder().customs(Map.of(EnrichMetadata.TYPE, enrichMetadata)))
+                .metadata(Metadata.builder().projectCustoms(Map.of(EnrichMetadata.TYPE, enrichMetadata)))
                 .build();
             when(clusterService.state()).thenReturn(state);
             return clusterService;
@@ -488,10 +490,10 @@ public class EnrichPolicyResolverTests extends ESTestCase {
             if (mapping != null) {
                 Map<String, IndexFieldCapabilities> fieldCaps = new HashMap<>();
                 for (Map.Entry<String, String> e : mapping.entrySet()) {
-                    var f = new IndexFieldCapabilities(e.getKey(), e.getValue(), false, false, false, false, null, Map.of());
+                    var f = new IndexFieldCapabilitiesBuilder(e.getKey(), e.getValue()).isSearchable(false).isAggregatable(false).build();
                     fieldCaps.put(e.getKey(), f);
                 }
-                var indexResponse = new FieldCapabilitiesIndexResponse(alias, null, fieldCaps, true);
+                var indexResponse = new FieldCapabilitiesIndexResponse(alias, null, fieldCaps, true, IndexMode.STANDARD);
                 response = new FieldCapabilitiesResponse(List.of(indexResponse), List.of());
             } else {
                 response = new FieldCapabilitiesResponse(List.of(), List.of());

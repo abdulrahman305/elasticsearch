@@ -18,7 +18,7 @@ import java.io.IOException;
 
 /**
  * Vector that stores BytesRef values.
- * This class is generated. Do not edit it.
+ * This class is generated. Edit {@code X-Vector.java.st} instead.
  */
 public sealed interface BytesRefVector extends Vector permits ConstantBytesRefVector, BytesRefArrayVector, ConstantNullVector,
     OrdinalBytesRefVector {
@@ -35,6 +35,9 @@ public sealed interface BytesRefVector extends Vector permits ConstantBytesRefVe
 
     @Override
     BytesRefVector filter(int... positions);
+
+    @Override
+    BytesRefBlock keepMask(BooleanVector mask);
 
     @Override
     ReleasableIterator<? extends BytesRefBlock> lookup(IntBlock positions, ByteSizeValue targetBlockSize);

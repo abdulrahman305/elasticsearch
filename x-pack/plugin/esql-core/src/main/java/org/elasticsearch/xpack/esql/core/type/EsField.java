@@ -7,33 +7,43 @@
 package org.elasticsearch.xpack.esql.core.type;
 
 import org.elasticsearch.TransportVersions;
-import org.elasticsearch.common.io.stream.NamedWriteable;
-import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.xpack.esql.core.util.PlanStreamInput;
+import org.elasticsearch.xpack.esql.core.util.PlanStreamOutput;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import static org.elasticsearch.xpack.esql.core.util.PlanStreamInput.readCachedStringWithVersionCheck;
+import static org.elasticsearch.xpack.esql.core.util.PlanStreamOutput.writeCachedStringWithVersionCheck;
 
 /**
  * Information about a field in an ES index.
  */
-public class EsField implements NamedWriteable {
-    public static List<NamedWriteableRegistry.Entry> getNamedWriteables() {
-        return List.of(
-            EsField.ENTRY,
-            DateEsField.ENTRY,
-            InvalidMappedField.ENTRY,
-            KeywordEsField.ENTRY,
-            TextEsField.ENTRY,
-            UnsupportedEsField.ENTRY
-        );
-    }
+public class EsField implements Writeable {
 
-    static final NamedWriteableRegistry.Entry ENTRY = new NamedWriteableRegistry.Entry(EsField.class, "EsField", EsField::new);
+    private static Map<String, Writeable.Reader<? extends EsField>> readers = Map.ofEntries(
+        Map.entry("DateEsField", DateEsField::new),
+        Map.entry("EsField", EsField::new),
+        Map.entry("InvalidMappedField", InvalidMappedField::new),
+        Map.entry("KeywordEsField", KeywordEsField::new),
+        Map.entry("MultiTypeEsField", MultiTypeEsField::new),
+        Map.entry("PotentiallyUnmappedKeywordEsField", PotentiallyUnmappedKeywordEsField::new),
+        Map.entry("TextEsField", TextEsField::new),
+        Map.entry("UnsupportedEsField", UnsupportedEsField::new)
+    );
+
+    public static Writeable.Reader<? extends EsField> getReader(String name) {
+        Reader<? extends EsField> result = readers.get(name);
+        if (result == null) {
+            throw new IllegalArgumentException("Invalid EsField type [" + name + "]");
+        }
+        return result;
+    }
 
     private final DataType esDataType;
     private final boolean aggregatable;
@@ -54,16 +64,16 @@ public class EsField implements NamedWriteable {
     }
 
     public EsField(StreamInput in) throws IOException {
-        this.name = in.readString();
+        this.name = readCachedStringWithVersionCheck(in);
         this.esDataType = readDataType(in);
-        this.properties = in.readImmutableMap(i -> i.readNamedWriteable(EsField.class));
+        this.properties = in.readImmutableMap(EsField::readFrom);
         this.aggregatable = in.readBoolean();
         this.isAlias = in.readBoolean();
     }
 
     private DataType readDataType(StreamInput in) throws IOException {
-        String name = in.readString();
-        if (in.getTransportVersion().before(TransportVersions.ESQL_NESTED_UNSUPPORTED) && name.equalsIgnoreCase("NESTED")) {
+        String name = readCachedStringWithVersionCheck(in);
+        if (in.getTransportVersion().before(TransportVersions.V_8_16_0) && name.equalsIgnoreCase("NESTED")) {
             /*
              * The "nested" data type existed in older versions of ESQL but was
              * entirely used to filter mappings away. Those versions will still
@@ -77,18 +87,33 @@ public class EsField implements NamedWriteable {
         return DataType.readFrom(name);
     }
 
+    public static <A extends EsField> A readFrom(StreamInput in) throws IOException {
+        return ((PlanStreamInput) in).readEsFieldWithCache();
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeString(name);
+        if (((PlanStreamOutput) out).writeEsFieldCacheHeader(this)) {
+            writeContent(out);
+        }
+    }
+
+    /**
+     * This needs to be overridden by subclasses for specific serialization
+     */
+    public void writeContent(StreamOutput out) throws IOException {
+        writeCachedStringWithVersionCheck(out, name);
         esDataType.writeTo(out);
-        out.writeMap(properties, StreamOutput::writeNamedWriteable);
+        out.writeMap(properties, (o, x) -> x.writeTo(out));
         out.writeBoolean(aggregatable);
         out.writeBoolean(isAlias);
     }
 
-    @Override
+    /**
+     * This needs to be overridden by subclasses for specific serialization
+     */
     public String getWriteableName() {
-        return ENTRY.name;
+        return "EsField";
     }
 
     /**

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.common.util.concurrent;
 
@@ -17,6 +18,7 @@ import org.elasticsearch.http.HttpTransportSettings;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.MockLog;
+import org.hamcrest.Matcher;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -467,14 +469,25 @@ public class ThreadContextTests extends ESTestCase {
             threadContext.putHeader("foo", "bar");
         }
 
+        final Matcher<? super String> matchesProjectId;
+        if (randomBoolean()) {
+            final String projectId = randomUUID();
+            matchesProjectId = equalTo(projectId);
+            threadContext.putHeader(Task.X_ELASTIC_PROJECT_ID_HTTP_HEADER, projectId);
+        } else {
+            matchesProjectId = nullValue();
+        }
+
         assertNull(threadContext.getTransient(ThreadContext.ACTION_ORIGIN_TRANSIENT_NAME));
         try (ThreadContext.StoredContext storedContext = threadContext.stashWithOrigin(origin)) {
             assertEquals(origin, threadContext.getTransient(ThreadContext.ACTION_ORIGIN_TRANSIENT_NAME));
             assertNull(threadContext.getTransient("foo"));
             assertNull(threadContext.getTransient("bar"));
+            assertThat(threadContext.getHeader(Task.X_ELASTIC_PROJECT_ID_HTTP_HEADER), matchesProjectId);
         }
 
         assertNull(threadContext.getTransient(ThreadContext.ACTION_ORIGIN_TRANSIENT_NAME));
+        assertThat(threadContext.getHeader(Task.X_ELASTIC_PROJECT_ID_HTTP_HEADER), matchesProjectId);
 
         if (setOtherValues) {
             assertEquals("bar", threadContext.getTransient("foo"));
@@ -638,6 +651,7 @@ public class ThreadContextTests extends ESTestCase {
         }
     }
 
+    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/112256")
     public void testDropWarningsExceedingMaxSettings() {
         Settings settings = Settings.builder()
             .put(HttpTransportSettings.SETTING_HTTP_MAX_WARNING_HEADER_COUNT.getKey(), 1)
@@ -1117,6 +1131,57 @@ public class ThreadContextTests extends ESTestCase {
             assertThat(requestHeaders, containsInAnyOrder(additionalHeaders.stream().map(Tuple::v1).toArray()));
             assertThat(threadContext.getTransient("authorization"), instanceOf(String.class)); // we don't sanitize transients
             assertThat(threadContext.getResponseHeaders().keySet(), containsInAnyOrder("authorization")); // we don't sanitize responses
+        }
+    }
+
+    public void testNewEmptyContext() {
+        final var threadContext = new ThreadContext(Settings.EMPTY);
+        final var header = randomBoolean() ? randomIdentifier() : randomFrom(HEADERS_TO_COPY);
+        threadContext.putHeader(header, randomIdentifier());
+
+        try (var ignored = threadContext.newEmptyContext()) {
+            assertTrue(threadContext.isDefaultContext());
+            assertNull(threadContext.getHeader(header));
+            assertTrue(threadContext.getHeaders().isEmpty());
+        }
+
+        assertNotNull(threadContext.getHeader(header));
+    }
+
+    public void testNewEmptySystemContext() {
+        final var threadContext = new ThreadContext(Settings.EMPTY);
+        final var header = randomBoolean() ? randomIdentifier() : randomFrom(HEADERS_TO_COPY);
+        threadContext.putHeader(header, randomIdentifier());
+
+        try (var ignored = threadContext.newEmptySystemContext()) {
+            assertTrue(threadContext.isSystemContext());
+            assertNull(threadContext.getHeader(header));
+            assertTrue(threadContext.getHeaders().isEmpty());
+        }
+
+        assertNotNull(threadContext.getHeader(header));
+    }
+
+    public void testRestoreExistingContext() {
+        final var threadContext = new ThreadContext(Settings.EMPTY);
+        final var header = randomIdentifier();
+        final var originalValue = randomIdentifier();
+        threadContext.putHeader(header, originalValue);
+        try (var originalContext = threadContext.newStoredContext()) {
+            assertEquals(originalValue, threadContext.getHeader(header));
+
+            try (var ignored1 = threadContext.newEmptyContext()) {
+                final var updatedValue = randomIdentifier();
+                threadContext.putHeader(header, updatedValue);
+
+                try (var ignored2 = threadContext.restoreExistingContext(originalContext)) {
+                    assertEquals(originalValue, threadContext.getHeader(header));
+                }
+
+                assertEquals(updatedValue, threadContext.getHeader(header));
+            }
+
+            assertEquals(originalValue, threadContext.getHeader(header));
         }
     }
 

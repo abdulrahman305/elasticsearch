@@ -11,11 +11,24 @@ base {
 dependencies {
   compileOnly project(':server')
   compileOnly project('ann')
+  compileOnly project(xpackModule('core'))
+  compileOnly project(xpackModule('ml'))
   annotationProcessor project('gen')
   implementation 'com.carrotsearch:hppc:0.8.1'
 
-  testImplementation project(':test:framework')
+  testImplementation(project(':modules:analysis-common'))
+  testImplementation(project(':test:framework'))
   testImplementation(project(xpackModule('esql-core')))
+  testImplementation(project(xpackModule('esql:compute:test'))) {
+    /*
+     * compute:test depends on this project's main code which is fine
+     * but we don't need to pull in the jar because we already have
+     * it being, you know, in this project....
+     */
+    transitive = false
+  }
+  testImplementation(project(xpackModule('core')))
+  testImplementation(project(xpackModule('ml')))
 }
 
 def projectDirectory = project.layout.projectDirectory
@@ -29,7 +42,7 @@ tasks.named('checkstyleMain').configure {
   excludes = ["**/*.java.st"]
 }
 
-tasks.named("spotlessJava") { dependsOn stringTemplates }
+tasks.named("spotlessJava") { dependsOn "stringTemplates" }
 
 spotless {
   java {
@@ -446,6 +459,32 @@ tasks.named('stringTemplates').configure {
     it.inputFile = stateInputFile
     it.outputFile = "org/elasticsearch/compute/aggregation/DoubleState.java"
   }
+  File fallibleStateInputFile = new File("${projectDir}/src/main/java/org/elasticsearch/compute/aggregation/X-FallibleState.java.st")
+  template {
+    it.properties = booleanProperties
+    it.inputFile =  fallibleStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/BooleanFallibleState.java"
+  }
+  template {
+    it.properties = intProperties
+    it.inputFile =  fallibleStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/IntFallibleState.java"
+  }
+  template {
+    it.properties = longProperties
+    it.inputFile =  fallibleStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/LongFallibleState.java"
+  }
+  template {
+    it.properties = floatProperties
+    it.inputFile =  fallibleStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/FloatFallibleState.java"
+  }
+  template {
+    it.properties = doubleProperties
+    it.inputFile =  fallibleStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/DoubleFallibleState.java"
+  }
   // block lookups
   File lookupInputFile = new File("${projectDir}/src/main/java/org/elasticsearch/compute/data/X-Lookup.java.st")
   template {
@@ -504,6 +543,32 @@ tasks.named('stringTemplates').configure {
     it.inputFile = arrayStateInputFile
     it.outputFile = "org/elasticsearch/compute/aggregation/FloatArrayState.java"
   }
+  File fallibleArrayStateInputFile = new File("${projectDir}/src/main/java/org/elasticsearch/compute/aggregation/X-FallibleArrayState.java.st")
+  template {
+    it.properties = booleanProperties
+    it.inputFile =  fallibleArrayStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/BooleanFallibleArrayState.java"
+  }
+  template {
+    it.properties = intProperties
+    it.inputFile =  fallibleArrayStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/IntFallibleArrayState.java"
+  }
+  template {
+    it.properties = longProperties
+    it.inputFile =  fallibleArrayStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/LongFallibleArrayState.java"
+  }
+  template {
+    it.properties = doubleProperties
+    it.inputFile =  fallibleArrayStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/DoubleFallibleArrayState.java"
+  }
+  template {
+    it.properties = floatProperties
+    it.inputFile =  fallibleArrayStateInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/FloatFallibleArrayState.java"
+  }
   File valuesAggregatorInputFile = new File("${projectDir}/src/main/java/org/elasticsearch/compute/aggregation/X-ValuesAggregator.java.st")
   template {
     it.properties = intProperties
@@ -553,6 +618,27 @@ tasks.named('stringTemplates').configure {
     it.outputFile = "org/elasticsearch/compute/aggregation/RateDoubleAggregator.java"
   }
 
+  File stdDevAggregatorInputFile = file("src/main/java/org/elasticsearch/compute/aggregation/X-StdDevAggregator.java.st")
+  template {
+    it.properties = intProperties
+    it.inputFile = stdDevAggregatorInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/StdDevIntAggregator.java"
+  }
+  template {
+    it.properties = longProperties
+    it.inputFile = stdDevAggregatorInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/StdDevLongAggregator.java"
+  }
+  template {
+    it.properties = floatProperties
+    it.inputFile = stdDevAggregatorInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/StdDevFloatAggregator.java"
+  }
+  template {
+    it.properties = doubleProperties
+    it.inputFile = stdDevAggregatorInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/StdDevDoubleAggregator.java"
+  }
 
   File topAggregatorInputFile = new File("${projectDir}/src/main/java/org/elasticsearch/compute/aggregation/X-TopAggregator.java.st")
   template {
@@ -579,6 +665,11 @@ tasks.named('stringTemplates').configure {
     it.properties = booleanProperties
     it.inputFile = topAggregatorInputFile
     it.outputFile = "org/elasticsearch/compute/aggregation/TopBooleanAggregator.java"
+  }
+  template {
+    it.properties = bytesRefProperties
+    it.inputFile = topAggregatorInputFile
+    it.outputFile = "org/elasticsearch/compute/aggregation/TopBytesRefAggregator.java"
   }
   template {
     it.properties = ipProperties
@@ -743,4 +834,32 @@ tasks.named('stringTemplates').configure {
     it.inputFile = bucketedSortInputFile
     it.outputFile = "org/elasticsearch/compute/data/sort/DoubleBucketedSort.java"
   }
+
+  File enrichResultBuilderInput = file("src/main/java/org/elasticsearch/compute/operator/lookup/X-EnrichResultBuilder.java.st")
+  template {
+    it.properties = intProperties
+    it.inputFile = enrichResultBuilderInput
+    it.outputFile = "org/elasticsearch/xpack/compute/operator/lookup/EnrichResultBuilderForInt.java"
+  }
+  template {
+    it.properties = longProperties
+    it.inputFile = enrichResultBuilderInput
+    it.outputFile = "org/elasticsearch/xpack/compute/operator/lookup/EnrichResultBuilderForLong.java"
+  }
+  template {
+    it.properties = doubleProperties
+    it.inputFile = enrichResultBuilderInput
+    it.outputFile = "org/elasticsearch/xpack/compute/operator/lookup/EnrichResultBuilderForDouble.java"
+  }
+  template {
+    it.properties = bytesRefProperties
+    it.inputFile = enrichResultBuilderInput
+    it.outputFile = "org/elasticsearch/xpack/compute/operator/lookup/EnrichResultBuilderForBytesRef.java"
+  }
+  template {
+    it.properties = booleanProperties
+    it.inputFile = enrichResultBuilderInput
+    it.outputFile = "org/elasticsearch/xpack/compute/operator/lookup/EnrichResultBuilderForBoolean.java"
+  }
+
 }

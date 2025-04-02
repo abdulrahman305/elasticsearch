@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.ingest.geoip.direct;
@@ -19,18 +20,17 @@ import org.elasticsearch.cluster.ClusterStateTaskListener;
 import org.elasticsearch.cluster.SimpleBatchedExecutor;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
-import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.cluster.service.MasterServiceTaskQueue;
 import org.elasticsearch.common.Priority;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Strings;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.ingest.geoip.IngestGeoIpMetadata;
 import org.elasticsearch.ingest.geoip.direct.PutDatabaseConfigurationAction.Request;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
@@ -64,8 +64,7 @@ public class TransportPutDatabaseConfigurationAction extends TransportMasterNode
         TransportService transportService,
         ClusterService clusterService,
         ThreadPool threadPool,
-        ActionFilters actionFilters,
-        IndexNameExpressionResolver indexNameExpressionResolver
+        ActionFilters actionFilters
     ) {
         super(
             PutDatabaseConfigurationAction.NAME,
@@ -74,7 +73,6 @@ public class TransportPutDatabaseConfigurationAction extends TransportMasterNode
             threadPool,
             actionFilters,
             Request::new,
-            indexNameExpressionResolver,
             AcknowledgedResponse::readFrom,
             EsExecutors.DIRECT_EXECUTOR_SERVICE
         );
@@ -88,6 +86,7 @@ public class TransportPutDatabaseConfigurationAction extends TransportMasterNode
     @Override
     protected void masterOperation(Task task, Request request, ClusterState state, ActionListener<AcknowledgedResponse> listener) {
         final String id = request.getDatabase().id();
+
         updateDatabaseConfigurationTaskQueue.submitTask(
             Strings.format("update-geoip-database-configuration-[%s]", id),
             new UpdateDatabaseConfigurationTask(listener, request.getDatabase()),
@@ -108,7 +107,7 @@ public class TransportPutDatabaseConfigurationAction extends TransportMasterNode
 
     static void validatePrerequisites(DatabaseConfiguration database, ClusterState state) {
         // we need to verify that the database represents a unique file (name) among the various databases for this same provider
-        IngestGeoIpMetadata geoIpMeta = state.metadata().custom(IngestGeoIpMetadata.TYPE, IngestGeoIpMetadata.EMPTY);
+        IngestGeoIpMetadata geoIpMeta = state.metadata().getProject().custom(IngestGeoIpMetadata.TYPE, IngestGeoIpMetadata.EMPTY);
 
         Optional<DatabaseConfiguration> sameName = geoIpMeta.getDatabases()
             .values()
@@ -131,7 +130,9 @@ public class TransportPutDatabaseConfigurationAction extends TransportMasterNode
             ClusterStateTaskListener {
 
         ClusterState execute(ClusterState currentState) throws Exception {
-            IngestGeoIpMetadata geoIpMeta = currentState.metadata().custom(IngestGeoIpMetadata.TYPE, IngestGeoIpMetadata.EMPTY);
+            IngestGeoIpMetadata geoIpMeta = currentState.metadata()
+                .getProject()
+                .custom(IngestGeoIpMetadata.TYPE, IngestGeoIpMetadata.EMPTY);
 
             String id = database.id();
             final DatabaseConfigurationMetadata existingDatabase = geoIpMeta.getDatabases().get(id);

@@ -7,9 +7,11 @@
 
 package org.elasticsearch.xpack.esql.expression.function;
 
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.core.capabilities.Unresolvable;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
@@ -20,12 +22,17 @@ import org.elasticsearch.xpack.esql.core.expression.Nullability;
 import org.elasticsearch.xpack.esql.core.tree.NodeInfo;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.core.type.EsField;
 import org.elasticsearch.xpack.esql.core.type.UnsupportedEsField;
 import org.elasticsearch.xpack.esql.core.util.PlanStreamOutput;
 import org.elasticsearch.xpack.esql.io.stream.PlanStreamInput;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Objects;
+
+import static org.elasticsearch.xpack.esql.core.util.PlanStreamInput.readCachedStringWithVersionCheck;
+import static org.elasticsearch.xpack.esql.core.util.PlanStreamOutput.writeCachedStringWithVersionCheck;
 
 /**
  * Unsupported attribute meaning an attribute that has been found yet cannot be used (hence why UnresolvedAttribute
@@ -54,28 +61,28 @@ public final class UnsupportedAttribute extends FieldAttribute implements Unreso
     private final boolean hasCustomMessage; // TODO remove me and just use message != null?
 
     private static String errorMessage(String name, UnsupportedEsField field) {
-        return "Cannot use field [" + name + "] with unsupported type [" + field.getOriginalType() + "]";
+        return "Cannot use field [" + name + "] with unsupported type [" + String.join(",", field.getOriginalTypes()) + "]";
     }
 
     public UnsupportedAttribute(Source source, String name, UnsupportedEsField field) {
         this(source, name, field, null);
     }
 
-    public UnsupportedAttribute(Source source, String name, UnsupportedEsField field, String customMessage) {
+    public UnsupportedAttribute(Source source, String name, UnsupportedEsField field, @Nullable String customMessage) {
         this(source, name, field, customMessage, null);
     }
 
-    public UnsupportedAttribute(Source source, String name, UnsupportedEsField field, String customMessage, NameId id) {
-        super(source, null, name, field, null, Nullability.TRUE, id, false);
+    public UnsupportedAttribute(Source source, String name, UnsupportedEsField field, @Nullable String customMessage, @Nullable NameId id) {
+        super(source, null, name, field, Nullability.TRUE, id, false);
         this.hasCustomMessage = customMessage != null;
-        this.message = customMessage == null ? errorMessage(qualifiedName(), field) : customMessage;
+        this.message = customMessage == null ? errorMessage(name(), field) : customMessage;
     }
 
     private UnsupportedAttribute(StreamInput in) throws IOException {
         this(
             Source.readFrom((PlanStreamInput) in),
-            in.readString(),
-            new UnsupportedEsField(in),
+            readCachedStringWithVersionCheck(in),
+            in.getTransportVersion().onOrAfter(TransportVersions.V_8_15_2) ? EsField.readFrom(in) : new UnsupportedEsField(in),
             in.readOptionalString(),
             NameId.readFrom((PlanStreamInput) in)
         );
@@ -85,8 +92,12 @@ public final class UnsupportedAttribute extends FieldAttribute implements Unreso
     public void writeTo(StreamOutput out) throws IOException {
         if (((PlanStreamOutput) out).writeAttributeCacheHeader(this)) {
             Source.EMPTY.writeTo(out);
-            out.writeString(name());
-            field().writeTo(out);
+            writeCachedStringWithVersionCheck(out, name());
+            if (out.getTransportVersion().onOrAfter(TransportVersions.V_8_15_2)) {
+                field().writeTo(out);
+            } else {
+                field().writeContent(out);
+            }
             out.writeOptionalString(hasCustomMessage ? message : null);
             id().writeTo(out);
         }
@@ -124,15 +135,7 @@ public final class UnsupportedAttribute extends FieldAttribute implements Unreso
     }
 
     @Override
-    protected Attribute clone(
-        Source source,
-        String name,
-        DataType type,
-        String qualifier,
-        Nullability nullability,
-        NameId id,
-        boolean synthetic
-    ) {
+    protected Attribute clone(Source source, String name, DataType type, Nullability nullability, NameId id, boolean synthetic) {
         return new UnsupportedAttribute(source, name, field(), hasCustomMessage ? message : null, id);
     }
 
@@ -142,7 +145,7 @@ public final class UnsupportedAttribute extends FieldAttribute implements Unreso
 
     @Override
     public String toString() {
-        return "!" + qualifiedName();
+        return "!" + name();
     }
 
     @Override
@@ -171,5 +174,10 @@ public final class UnsupportedAttribute extends FieldAttribute implements Unreso
             return Objects.equals(hasCustomMessage, ua.hasCustomMessage) && Objects.equals(message, ua.message);
         }
         return false;
+    }
+
+    @Override
+    public List<String> originalTypes() {
+        return field().getOriginalTypes();
     }
 }

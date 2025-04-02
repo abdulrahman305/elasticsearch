@@ -12,9 +12,9 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ByteArrayEntity;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.xcontent.XContentType;
-import org.elasticsearch.xpack.inference.external.anthropic.AnthropicAccount;
 import org.elasticsearch.xpack.inference.external.request.HttpRequest;
 import org.elasticsearch.xpack.inference.external.request.Request;
+import org.elasticsearch.xpack.inference.services.anthropic.AnthropicAccount;
 import org.elasticsearch.xpack.inference.services.anthropic.completion.AnthropicChatCompletionModel;
 
 import java.net.URI;
@@ -29,11 +29,13 @@ public class AnthropicChatCompletionRequest implements Request {
     private final AnthropicAccount account;
     private final List<String> input;
     private final AnthropicChatCompletionModel model;
+    private final boolean stream;
 
-    public AnthropicChatCompletionRequest(List<String> input, AnthropicChatCompletionModel model) {
+    public AnthropicChatCompletionRequest(List<String> input, AnthropicChatCompletionModel model, boolean stream) {
         this.account = AnthropicAccount.of(model);
         this.input = Objects.requireNonNull(input);
         this.model = Objects.requireNonNull(model);
+        this.stream = stream;
     }
 
     @Override
@@ -41,7 +43,7 @@ public class AnthropicChatCompletionRequest implements Request {
         HttpPost httpPost = new HttpPost(account.uri());
 
         ByteArrayEntity byteEntity = new ByteArrayEntity(
-            Strings.toString(new AnthropicChatCompletionRequestEntity(input, model.getServiceSettings(), model.getTaskSettings()))
+            Strings.toString(new AnthropicChatCompletionRequestEntity(input, model.getServiceSettings(), model.getTaskSettings(), stream))
                 .getBytes(StandardCharsets.UTF_8)
         );
         httpPost.setEntity(byteEntity);
@@ -73,6 +75,11 @@ public class AnthropicChatCompletionRequest implements Request {
     @Override
     public String getInferenceEntityId() {
         return model.getInferenceEntityId();
+    }
+
+    @Override
+    public boolean isStreaming() {
+        return stream;
     }
 
 }

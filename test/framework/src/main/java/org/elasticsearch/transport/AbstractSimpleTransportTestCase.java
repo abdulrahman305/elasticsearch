@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.transport;
@@ -544,7 +545,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
             }
 
             @Override
-            public void onResponseSent(long requestId, String action, TransportResponse response) {
+            public void onResponseSent(long requestId, String action) {
                 if (action.equals(ACTION)) {
                     responseSent.incrementAndGet();
                 }
@@ -667,7 +668,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                 )
                 .build();
             ConnectionProfile connectionProfile = ConnectionProfile.buildDefaultConnectionProfile(settingsWithCompress);
-            connectToNode(serviceC, serviceA.getLocalDiscoNode(), connectionProfile);
+            connectToNode(serviceC, serviceA.getLocalNode(), connectionProfile);
 
             Future<TransportResponse.Empty> res = submitRequest(
                 serviceC,
@@ -724,7 +725,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                 )
                 .build();
             ConnectionProfile connectionProfile = ConnectionProfile.buildDefaultConnectionProfile(settingsWithCompress);
-            connectToNode(serviceC, serviceA.getLocalDiscoNode(), connectionProfile);
+            connectToNode(serviceC, serviceA.getLocalNode(), connectionProfile);
 
             Future<StringMessageResponse> res = submitRequest(
                 serviceC,
@@ -794,8 +795,8 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                 )
                 .build();
             ConnectionProfile connectionProfile = ConnectionProfile.buildDefaultConnectionProfile(settingsWithCompress);
-            connectToNode(serviceC, serviceA.getLocalDiscoNode(), connectionProfile);
-            connectToNode(serviceA, serviceC.getLocalDiscoNode(), connectionProfile);
+            connectToNode(serviceC, serviceA.getLocalNode(), connectionProfile);
+            connectToNode(serviceA, serviceC.getLocalNode(), connectionProfile);
 
             TransportResponseHandler<StringMessageResponse> responseHandler = new TransportResponseHandler<>() {
                 @Override
@@ -820,14 +821,14 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
 
             Future<StringMessageResponse> compressed = submitRequest(
                 serviceC,
-                serviceA.getLocalDiscoNode(),
+                serviceA.getLocalNode(),
                 "internal:sayHello",
                 new StringMessageRequest(text, -1, true),
                 responseHandler
             );
             Future<StringMessageResponse> uncompressed = submitRequest(
                 serviceA,
-                serviceC.getLocalDiscoNode(),
+                serviceC.getLocalNode(),
                 "internal:sayHello",
                 new StringMessageRequest(text, -1, false),
                 responseHandler
@@ -1048,7 +1049,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                     ignoringRequestHandler
                 );
                 serviceB = newService;
-                nodeB = newService.getLocalDiscoNode();
+                nodeB = newService.getLocalNode();
                 connectToNode(serviceB, nodeA);
                 connectToNode(serviceA, nodeB);
             } else if (serviceA.nodeConnected(nodeB)) {
@@ -1372,7 +1373,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
 
             serviceA.sendRequest(nodeB, "internal:test", new StringMessageRequest("", 10), noopResponseHandler);
 
-            assertBusy(mockLog::assertAllExpectationsMatched);
+            mockLog.awaitAllExpectationsMatched();
 
             ////////////////////////////////////////////////////////////////////////
             // tests for included action type "internal:testError" which returns an error
@@ -1419,7 +1420,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
 
             serviceA.sendRequest(nodeB, "internal:testError", new StringMessageRequest(""), noopResponseHandler);
 
-            assertBusy(mockLog::assertAllExpectationsMatched);
+            mockLog.awaitAllExpectationsMatched();
 
             ////////////////////////////////////////////////////////////////////////
             // tests for excluded action type "internal:testNotSeen"
@@ -1466,7 +1467,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
 
             submitRequest(serviceA, nodeB, "internal:testNotSeen", new StringMessageRequest(""), noopResponseHandler).get();
 
-            assertBusy(mockLog::assertAllExpectationsMatched);
+            mockLog.awaitAllExpectationsMatched();
         }
     }
 
@@ -1924,7 +1925,6 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
     public void testHostOnMessages() throws InterruptedException {
         final CountDownLatch latch = new CountDownLatch(2);
         final AtomicReference<InetSocketAddress> addressA = new AtomicReference<>();
-        final AtomicReference<InetSocketAddress> addressB = new AtomicReference<>();
         serviceB.registerRequestHandler(
             "internal:action1",
             EsExecutors.DIRECT_EXECUTOR_SERVICE,
@@ -1948,7 +1948,6 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
 
             @Override
             public void handleResponse(TestResponse response) {
-                addressB.set(response.remoteAddress());
                 latch.countDown();
             }
 
@@ -1964,9 +1963,6 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
 
         // nodeA opened the connection so the request originates from an ephemeral port, but from the right interface at least
         assertEquals(nodeA.getAddress().address().getAddress(), addressA.get().getAddress());
-
-        // the response originates from the expected transport port
-        assertEquals(nodeB.getAddress().address(), addressB.get());
     }
 
     public void testRejectEarlyIncomingRequests() throws Exception {
@@ -2091,7 +2087,6 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
         final String info;
 
         TestResponse(StreamInput in) throws IOException {
-            super(in);
             this.info = in.readOptionalString();
         }
 
@@ -2757,8 +2752,8 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                 TransportStats transportStats = serviceC.transport.getStats(); // we did a single round-trip to do the initial handshake
                 assertEquals(1, transportStats.getRxCount());
                 assertEquals(1, transportStats.getTxCount());
-                assertEquals(29, transportStats.getRxSize().getBytes());
-                assertEquals(55, transportStats.getTxSize().getBytes());
+                assertEquals(35, transportStats.getRxSize().getBytes());
+                assertEquals(60, transportStats.getTxSize().getBytes());
             });
             serviceC.sendRequest(
                 connection,
@@ -2772,16 +2767,16 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                 TransportStats transportStats = serviceC.transport.getStats(); // request has been send
                 assertEquals(1, transportStats.getRxCount());
                 assertEquals(2, transportStats.getTxCount());
-                assertEquals(29, transportStats.getRxSize().getBytes());
-                assertEquals(114, transportStats.getTxSize().getBytes());
+                assertEquals(35, transportStats.getRxSize().getBytes());
+                assertEquals(119, transportStats.getTxSize().getBytes());
             });
             sendResponseLatch.countDown();
             responseLatch.await();
             stats = serviceC.transport.getStats(); // response has been received
             assertEquals(2, stats.getRxCount());
             assertEquals(2, stats.getTxCount());
-            assertEquals(54, stats.getRxSize().getBytes());
-            assertEquals(114, stats.getTxSize().getBytes());
+            assertEquals(60, stats.getRxSize().getBytes());
+            assertEquals(119, stats.getTxSize().getBytes());
         } finally {
             serviceC.close();
         }
@@ -2872,8 +2867,8 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                 TransportStats transportStats = serviceC.transport.getStats(); // request has been sent
                 assertEquals(1, transportStats.getRxCount());
                 assertEquals(1, transportStats.getTxCount());
-                assertEquals(29, transportStats.getRxSize().getBytes());
-                assertEquals(55, transportStats.getTxSize().getBytes());
+                assertEquals(35, transportStats.getRxSize().getBytes());
+                assertEquals(60, transportStats.getTxSize().getBytes());
             });
             serviceC.sendRequest(
                 connection,
@@ -2887,8 +2882,8 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                 TransportStats transportStats = serviceC.transport.getStats(); // request has been sent
                 assertEquals(1, transportStats.getRxCount());
                 assertEquals(2, transportStats.getTxCount());
-                assertEquals(29, transportStats.getRxSize().getBytes());
-                assertEquals(114, transportStats.getTxSize().getBytes());
+                assertEquals(35, transportStats.getRxSize().getBytes());
+                assertEquals(119, transportStats.getTxSize().getBytes());
             });
             sendResponseLatch.countDown();
             responseLatch.await();
@@ -2903,8 +2898,8 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
             String failedMessage = "Unexpected read bytes size. The transport exception that was received=" + exception;
             // 57 bytes are the non-exception message bytes that have been received. It should include the initial
             // handshake message and the header, version, etc bytes in the exception message.
-            assertEquals(failedMessage, 57 + streamOutput.bytes().length(), stats.getRxSize().getBytes());
-            assertEquals(114, stats.getTxSize().getBytes());
+            assertEquals(failedMessage, 63 + streamOutput.bytes().length(), stats.getRxSize().getBytes());
+            assertEquals(119, stats.getTxSize().getBytes());
         } finally {
             serviceC.close();
         }
@@ -3368,7 +3363,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
                 "stuck threads logging",
                 ThreadWatchdog.class.getCanonicalName(),
                 Level.WARN,
-                "the following threads are active but did not make progress in the preceding [5s]: [" + threadName + "]"
+                "the following threads are active but did not make progress in the preceding [5s]: [*" + threadName + "*]"
             )
         );
         safeAwait(barrier);
@@ -3418,7 +3413,7 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
         ) {
             final CountDownLatch latch = new CountDownLatch(1);
             serviceC.connectToNode(
-                serviceA.getLocalDiscoNode(),
+                serviceA.getLocalNode(),
                 ConnectionProfile.buildDefaultConnectionProfile(Settings.EMPTY),
                 new ActionListener<>() {
                     @Override
@@ -3506,9 +3501,10 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
         DiscoveryNode node,
         ConnectionProfile connectionProfile
     ) {
-        return asInstanceOf(
+        return safeAwaitFailure(
             ConnectTransportException.class,
-            safeAwaitFailure(Releasable.class, listener -> service.connectToNode(node, connectionProfile, listener))
+            Releasable.class,
+            listener -> service.connectToNode(node, connectionProfile, listener)
         );
     }
 
@@ -3531,9 +3527,10 @@ public abstract class AbstractSimpleTransportTestCase extends ESTestCase {
         DiscoveryNode node,
         ConnectionProfile connectionProfile
     ) {
-        return asInstanceOf(
+        return safeAwaitFailure(
             ConnectTransportException.class,
-            safeAwaitFailure(Transport.Connection.class, listener -> service.openConnection(node, connectionProfile, listener))
+            Transport.Connection.class,
+            listener -> service.openConnection(node, connectionProfile, listener)
         );
     }
 

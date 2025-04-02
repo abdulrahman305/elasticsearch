@@ -7,20 +7,29 @@
 
 package org.elasticsearch.xpack.esql.parser;
 
+import org.elasticsearch.common.logging.LoggerMessageFormat;
+import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.xpack.esql.VerificationException;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
+import org.elasticsearch.xpack.esql.core.expression.MapExpression;
 import org.elasticsearch.xpack.esql.core.expression.UnresolvedAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.expression.function.UnresolvedFunction;
+import org.elasticsearch.xpack.esql.plan.IndexPattern;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
+import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static org.elasticsearch.xpack.esql.core.tree.Source.EMPTY;
 import static org.elasticsearch.xpack.esql.core.util.NumericUtils.asLongUnsigned;
+import static org.elasticsearch.xpack.esql.expression.function.FunctionResolutionStrategy.DEFAULT;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 
@@ -38,6 +47,10 @@ abstract class AbstractStatementParserTests extends ESTestCase {
         assertThat(statement, actual, equalTo(expected));
     }
 
+    LogicalPlan statement(String query, String arg) {
+        return statement(LoggerMessageFormat.format(null, query, arg), new QueryParams());
+    }
+
     LogicalPlan statement(String e) {
         return statement(e, new QueryParams());
     }
@@ -52,6 +65,14 @@ abstract class AbstractStatementParserTests extends ESTestCase {
 
     static UnresolvedAttribute attribute(String name) {
         return new UnresolvedAttribute(EMPTY, name);
+    }
+
+    static UnresolvedFunction function(String name, List<Expression> args) {
+        return new UnresolvedFunction(EMPTY, name, DEFAULT, args);
+    }
+
+    static UnresolvedRelation relation(String name) {
+        return new UnresolvedRelation(EMPTY, new IndexPattern(EMPTY, name), false, List.of(), IndexMode.STANDARD, null, "FROM");
     }
 
     static Literal integer(int i) {
@@ -106,22 +127,64 @@ abstract class AbstractStatementParserTests extends ESTestCase {
         return new Literal(EMPTY, Arrays.asList(strings), DataType.KEYWORD);
     }
 
-    void expectError(String query, String errorMessage) {
-        ParsingException e = expectThrows(ParsingException.class, "Expected syntax error for " + query, () -> statement(query));
-        assertThat(e.getMessage(), containsString(errorMessage));
+    static MapExpression mapExpression(Map<String, Object> keyValuePairs) {
+        List<Expression> ees = new ArrayList<>(keyValuePairs.size());
+        for (Map.Entry<String, Object> entry : keyValuePairs.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            DataType type = (value instanceof List<?> l) ? DataType.fromJava(l.get(0)) : DataType.fromJava(value);
+            ees.add(new Literal(EMPTY, key, DataType.KEYWORD));
+            ees.add(new Literal(EMPTY, value, type));
+        }
+        return new MapExpression(EMPTY, ees);
     }
 
-    void expectVerificationError(String query, String errorMessage) {
-        VerificationException e = expectThrows(VerificationException.class, "Expected syntax error for " + query, () -> statement(query));
-        assertThat(e.getMessage(), containsString(errorMessage));
+    void expectError(String query, String errorMessage) {
+        expectError(query, null, errorMessage);
     }
 
     void expectError(String query, List<QueryParam> params, String errorMessage) {
-        ParsingException e = expectThrows(
+        expectThrows(
+            "Query [" + query + "] is expected to throw " + ParsingException.class + " with message [" + errorMessage + "]",
             ParsingException.class,
-            "Expected syntax error for " + query,
+            containsString(errorMessage),
             () -> statement(query, new QueryParams(params))
         );
-        assertThat(e.getMessage(), containsString(errorMessage));
+    }
+
+    void expectVerificationError(String query, String errorMessage) {
+        expectThrows(
+            "Query [" + query + "] is expected to throw " + VerificationException.class + " with message [" + errorMessage + "]",
+            VerificationException.class,
+            containsString(errorMessage),
+            () -> parser.createStatement(query)
+        );
+    }
+
+    void expectInvalidIndexNameErrorWithLineNumber(String query, String indexString, String lineNumber) {
+        if ((indexString.contains("|") || indexString.contains(" ")) == false) {
+            expectInvalidIndexNameErrorWithLineNumber(query, indexString, lineNumber, indexString);
+        }
+        expectInvalidIndexNameErrorWithLineNumber(query, "\"" + indexString + "\"", lineNumber, indexString);
+    }
+
+    void expectErrorWithLineNumber(String query, String indexString, String lineNumber, String error) {
+        expectError(LoggerMessageFormat.format(null, query, indexString), lineNumber + error);
+    }
+
+    void expectInvalidIndexNameErrorWithLineNumber(String query, String indexString, String lineNumber, String name) {
+        expectError(LoggerMessageFormat.format(null, query, indexString), lineNumber + "Invalid index name [" + name);
+    }
+
+    void expectInvalidIndexNameErrorWithLineNumber(String query, String indexString, String lineNumber, String name, String error) {
+        expectError(LoggerMessageFormat.format(null, query, indexString), lineNumber + "Invalid index name [" + name + "], " + error);
+    }
+
+    void expectDateMathErrorWithLineNumber(String query, String arg, String lineNumber, String error) {
+        expectError(LoggerMessageFormat.format(null, query, arg), lineNumber + error);
+    }
+
+    void expectDoubleColonErrorWithLineNumber(String query, String indexString, int lineNumber) {
+        expectError(LoggerMessageFormat.format(null, query, indexString), "line 1:" + lineNumber + ": mismatched input '::'");
     }
 }

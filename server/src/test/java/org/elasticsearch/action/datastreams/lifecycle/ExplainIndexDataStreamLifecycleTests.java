@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.datastreams.lifecycle;
@@ -199,11 +200,7 @@ public class ExplainIndexDataStreamLifecycleTests extends AbstractWireSerializin
         TimeValue configuredRetention = TimeValue.timeValueDays(100);
         TimeValue globalDefaultRetention = TimeValue.timeValueDays(10);
         TimeValue globalMaxRetention = TimeValue.timeValueDays(50);
-        DataStreamLifecycle dataStreamLifecycle = new DataStreamLifecycle(
-            new DataStreamLifecycle.Retention(configuredRetention),
-            null,
-            null
-        );
+        DataStreamLifecycle dataStreamLifecycle = new DataStreamLifecycle(true, configuredRetention, null);
         {
             boolean isSystemDataStream = true;
             ExplainIndexDataStreamLifecycle explainIndexDataStreamLifecycle = createManagedIndexDataStreamLifecycleExplanation(

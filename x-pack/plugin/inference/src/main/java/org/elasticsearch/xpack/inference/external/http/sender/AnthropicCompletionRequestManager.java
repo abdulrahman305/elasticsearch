@@ -12,14 +12,13 @@ import org.apache.logging.log4j.Logger;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.inference.InferenceServiceResults;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.xpack.inference.external.anthropic.AnthropicResponseHandler;
 import org.elasticsearch.xpack.inference.external.http.retry.RequestSender;
 import org.elasticsearch.xpack.inference.external.http.retry.ResponseHandler;
 import org.elasticsearch.xpack.inference.external.request.anthropic.AnthropicChatCompletionRequest;
 import org.elasticsearch.xpack.inference.external.response.anthropic.AnthropicChatCompletionResponseEntity;
+import org.elasticsearch.xpack.inference.services.anthropic.AnthropicResponseHandler;
 import org.elasticsearch.xpack.inference.services.anthropic.completion.AnthropicChatCompletionModel;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -47,13 +46,15 @@ public class AnthropicCompletionRequestManager extends AnthropicRequestManager {
         Supplier<Boolean> hasRequestCompletedFunction,
         ActionListener<InferenceServiceResults> listener
     ) {
-        List<String> docsInput = DocumentsOnlyInput.of(inferenceInputs).getInputs();
-        AnthropicChatCompletionRequest request = new AnthropicChatCompletionRequest(docsInput, model);
+        var chatCompletionInput = inferenceInputs.castTo(ChatCompletionInput.class);
+        var inputs = chatCompletionInput.getInputs();
+        var stream = chatCompletionInput.stream();
+        AnthropicChatCompletionRequest request = new AnthropicChatCompletionRequest(inputs, model, stream);
 
         execute(new ExecutableInferenceRequest(requestSender, logger, request, HANDLER, hasRequestCompletedFunction, listener));
     }
 
     private static ResponseHandler createCompletionHandler() {
-        return new AnthropicResponseHandler("anthropic completions", AnthropicChatCompletionResponseEntity::fromResponse);
+        return new AnthropicResponseHandler("anthropic completions", AnthropicChatCompletionResponseEntity::fromResponse, true);
     }
 }

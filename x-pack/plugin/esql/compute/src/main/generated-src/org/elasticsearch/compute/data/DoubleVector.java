@@ -17,7 +17,7 @@ import java.io.IOException;
 
 /**
  * Vector that stores double values.
- * This class is generated. Do not edit it.
+ * This class is generated. Edit {@code X-Vector.java.st} instead.
  */
 public sealed interface DoubleVector extends Vector permits ConstantDoubleVector, DoubleArrayVector, DoubleBigArrayVector,
     ConstantNullVector {
@@ -28,6 +28,9 @@ public sealed interface DoubleVector extends Vector permits ConstantDoubleVector
 
     @Override
     DoubleVector filter(int... positions);
+
+    @Override
+    DoubleBlock keepMask(BooleanVector mask);
 
     @Override
     ReleasableIterator<? extends DoubleBlock> lookup(IntBlock positions, ByteSizeValue targetBlockSize);

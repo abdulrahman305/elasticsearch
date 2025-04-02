@@ -9,7 +9,6 @@ package org.elasticsearch.compute.data;
 
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.RamUsageEstimator;
-import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.core.ReleasableIterator;
@@ -49,6 +48,11 @@ final class ConstantNullBlock extends AbstractNonThreadSafeRefCounted
     }
 
     @Override
+    public ToMask toMask() {
+        return new ToMask(blockFactory.newConstantBooleanVector(false, positionCount), false);
+    }
+
+    @Override
     public boolean isNull(int position) {
         return true;
     }
@@ -84,19 +88,13 @@ final class ConstantNullBlock extends AbstractNonThreadSafeRefCounted
     }
 
     @Override
-    public ReleasableIterator<ConstantNullBlock> lookup(IntBlock positions, ByteSizeValue targetBlockSize) {
-        return ReleasableIterator.single((ConstantNullBlock) positions.blockFactory().newConstantNullBlock(positions.getPositionCount()));
+    public ConstantNullBlock keepMask(BooleanVector mask) {
+        return (ConstantNullBlock) blockFactory().newConstantNullBlock(getPositionCount());
     }
 
-    public static final NamedWriteableRegistry.Entry ENTRY = new NamedWriteableRegistry.Entry(
-        Block.class,
-        "ConstantNullBlock",
-        in -> ((BlockStreamInput) in).readConstantNullBlock()
-    );
-
     @Override
-    public String getWriteableName() {
-        return "ConstantNullBlock";
+    public ReleasableIterator<ConstantNullBlock> lookup(IntBlock positions, ByteSizeValue targetBlockSize) {
+        return ReleasableIterator.single((ConstantNullBlock) positions.blockFactory().newConstantNullBlock(positions.getPositionCount()));
     }
 
     @Override

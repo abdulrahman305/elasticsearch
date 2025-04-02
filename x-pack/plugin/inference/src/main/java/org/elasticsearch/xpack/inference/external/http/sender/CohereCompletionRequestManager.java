@@ -12,14 +12,13 @@ import org.apache.logging.log4j.Logger;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.inference.InferenceServiceResults;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.xpack.inference.external.cohere.CohereResponseHandler;
 import org.elasticsearch.xpack.inference.external.http.retry.RequestSender;
 import org.elasticsearch.xpack.inference.external.http.retry.ResponseHandler;
 import org.elasticsearch.xpack.inference.external.request.cohere.completion.CohereCompletionRequest;
 import org.elasticsearch.xpack.inference.external.response.cohere.CohereCompletionResponseEntity;
+import org.elasticsearch.xpack.inference.services.cohere.CohereResponseHandler;
 import org.elasticsearch.xpack.inference.services.cohere.completion.CohereCompletionModel;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -30,7 +29,7 @@ public class CohereCompletionRequestManager extends CohereRequestManager {
     private static final ResponseHandler HANDLER = createCompletionHandler();
 
     private static ResponseHandler createCompletionHandler() {
-        return new CohereResponseHandler("cohere completion", CohereCompletionResponseEntity::fromResponse);
+        return new CohereResponseHandler("cohere completion", CohereCompletionResponseEntity::fromResponse, true);
     }
 
     public static CohereCompletionRequestManager of(CohereCompletionModel model, ThreadPool threadPool) {
@@ -51,8 +50,10 @@ public class CohereCompletionRequestManager extends CohereRequestManager {
         Supplier<Boolean> hasRequestCompletedFunction,
         ActionListener<InferenceServiceResults> listener
     ) {
-        List<String> docsInput = DocumentsOnlyInput.of(inferenceInputs).getInputs();
-        CohereCompletionRequest request = new CohereCompletionRequest(docsInput, model);
+        var chatCompletionInput = inferenceInputs.castTo(ChatCompletionInput.class);
+        var inputs = chatCompletionInput.getInputs();
+        var stream = chatCompletionInput.stream();
+        CohereCompletionRequest request = new CohereCompletionRequest(inputs, model, stream);
 
         execute(new ExecutableInferenceRequest(requestSender, logger, request, HANDLER, hasRequestCompletedFunction, listener));
     }

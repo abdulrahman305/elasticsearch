@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.bulk;
@@ -83,7 +84,7 @@ public class FailureStoreDocumentConverterTests extends ESTestCase {
 
         assertThat(ObjectPath.eval("document.id", convertedRequest.sourceAsMap()), is(equalTo("1")));
         assertThat(ObjectPath.eval("document.routing", convertedRequest.sourceAsMap()), is(equalTo("fake_routing")));
-        assertThat(ObjectPath.eval("document.index", convertedRequest.sourceAsMap()), is(equalTo(targetIndexName)));
+        assertThat(ObjectPath.eval("document.index", convertedRequest.sourceAsMap()), is(equalTo("original_index")));
         assertThat(ObjectPath.eval("document.source.key", convertedRequest.sourceAsMap()), is(equalTo("value")));
 
         assertThat(ObjectPath.eval("error.type", convertedRequest.sourceAsMap()), is(equalTo("exception")));

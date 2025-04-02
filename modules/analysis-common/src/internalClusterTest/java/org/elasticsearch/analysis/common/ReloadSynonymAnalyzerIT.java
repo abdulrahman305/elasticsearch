@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.analysis.common;
@@ -56,7 +57,7 @@ public class ReloadSynonymAnalyzerIT extends ESIntegTestCase {
     }
 
     private void testSynonymsUpdate(boolean preview) throws FileNotFoundException, IOException, InterruptedException {
-        Path config = internalCluster().getInstance(Environment.class).configFile();
+        Path config = internalCluster().getInstance(Environment.class).configDir();
         String synonymsFileName = "synonyms.txt";
         Path synonymsFile = config.resolve(synonymsFileName);
         writeFile(synonymsFile, "foo, baz");
@@ -105,7 +106,7 @@ public class ReloadSynonymAnalyzerIT extends ESIntegTestCase {
         final String synonymsFileName = "synonyms.txt";
         final String fieldName = "field";
 
-        Path config = internalCluster().getInstance(Environment.class).configFile();
+        Path config = internalCluster().getInstance(Environment.class).configDir();
         Path synonymsFile = config.resolve(synonymsFileName);
         writeFile(synonymsFile, "foo, baz");
 

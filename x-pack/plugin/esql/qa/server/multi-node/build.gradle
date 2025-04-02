@@ -11,12 +11,13 @@ dependencies {
 
   clusterPlugins project(':plugins:mapper-size')
   clusterPlugins project(':plugins:mapper-murmur3')
+  clusterPlugins project(':x-pack:plugin:inference:qa:test-service-plugin')
 }
 
 GradleUtils.extendSourceSet(project, "javaRestTest", "yamlRestTest")
 
 tasks.named('javaRestTest') {
-  usesDefaultDistribution()
+  usesDefaultDistribution("to be triaged")
 }
 
 restResources {
@@ -29,6 +30,6 @@ restResources {
 }
 
 tasks.named('yamlRestTest') {
-  usesDefaultDistribution()
+  usesDefaultDistribution("to be triaged")
   maxParallelForks = 1
 }
