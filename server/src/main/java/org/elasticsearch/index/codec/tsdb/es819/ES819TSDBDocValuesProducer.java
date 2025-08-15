@@ -43,6 +43,7 @@ import org.apache.lucene.util.packed.DirectMonotonicReader;
 import org.apache.lucene.util.packed.PackedInts;
 import org.elasticsearch.core.IOUtils;
 import org.elasticsearch.index.codec.tsdb.TSDBDocValuesEncoder;
+import org.elasticsearch.index.mapper.BlockLoader;
 
 import java.io.IOException;
 
@@ -51,11 +52,11 @@ import static org.elasticsearch.index.codec.tsdb.es819.ES819TSDBDocValuesFormat.
 import static org.elasticsearch.index.codec.tsdb.es819.ES819TSDBDocValuesFormat.TERMS_DICT_BLOCK_LZ4_SHIFT;
 
 final class ES819TSDBDocValuesProducer extends DocValuesProducer {
-    private final IntObjectHashMap<NumericEntry> numerics;
-    private final IntObjectHashMap<BinaryEntry> binaries;
-    private final IntObjectHashMap<SortedEntry> sorted;
-    private final IntObjectHashMap<SortedSetEntry> sortedSets;
-    private final IntObjectHashMap<SortedNumericEntry> sortedNumerics;
+    final IntObjectHashMap<NumericEntry> numerics;
+    final IntObjectHashMap<BinaryEntry> binaries;
+    final IntObjectHashMap<SortedEntry> sorted;
+    final IntObjectHashMap<SortedSetEntry> sortedSets;
+    final IntObjectHashMap<SortedNumericEntry> sortedNumerics;
     private final IntObjectHashMap<DocValuesSkipperEntry> skippers;
     private final IndexInput data;
     private final int maxDoc;
@@ -1140,7 +1141,7 @@ final class ES819TSDBDocValuesProducer extends DocValuesProducer {
         final int bitsPerOrd = maxOrd >= 0 ? PackedInts.bitsRequired(maxOrd - 1) : -1;
         if (entry.docsWithFieldOffset == -1) {
             // dense
-            return new NumericDocValues() {
+            return new BulkNumericDocValues() {
 
                 private final int maxDoc = ES819TSDBDocValuesProducer.this.maxDoc;
                 private int doc = -1;
@@ -1197,6 +1198,53 @@ final class ES819TSDBDocValuesProducer extends DocValuesProducer {
                     }
                     return currentBlock[blockInIndex];
                 }
+
+                @Override
+                public BlockLoader.Block read(BlockLoader.BlockFactory factory, BlockLoader.Docs docs, int offset) throws IOException {
+                    assert maxOrd == -1 : "unexpected maxOrd[" + maxOrd + "]";
+                    final int docsCount = docs.count();
+                    doc = docs.get(docsCount - 1);
+                    try (BlockLoader.SingletonLongBuilder builder = factory.singletonLongs(docs.count() - offset)) {
+                        for (int i = offset; i < docsCount;) {
+                            int index = docs.get(i);
+                            final int blockIndex = index >>> ES819TSDBDocValuesFormat.NUMERIC_BLOCK_SHIFT;
+                            final int blockInIndex = index & ES819TSDBDocValuesFormat.NUMERIC_BLOCK_MASK;
+                            if (blockIndex != currentBlockIndex) {
+                                assert blockIndex > currentBlockIndex : blockIndex + " < " + currentBlockIndex;
+                                // no need to seek if the loading block is the next block
+                                if (currentBlockIndex + 1 != blockIndex) {
+                                    valuesData.seek(indexReader.get(blockIndex));
+                                }
+                                currentBlockIndex = blockIndex;
+                                decoder.decode(valuesData, currentBlock);
+                            }
+
+                            // Try to append more than just one value:
+                            // Instead of iterating over docs and find the max length, take an optimistic approach to avoid as
+                            // many comparisons as there are remaining docs and instead do at most 7 comparisons:
+                            int length = 1;
+                            int remainingBlockLength = Math.min(ES819TSDBDocValuesFormat.NUMERIC_BLOCK_SIZE - blockInIndex, docsCount - i);
+                            for (int newLength = remainingBlockLength; newLength > 1; newLength = newLength >> 1) {
+                                int lastIndex = i + newLength - 1;
+                                if (isDense(index, docs.get(lastIndex), newLength)) {
+                                    length = newLength;
+                                    break;
+                                }
+                            }
+                            builder.appendLongs(currentBlock, blockInIndex, length);
+                            i += length;
+                        }
+                        return builder.build();
+                    }
+                }
+
+                static boolean isDense(int firstDocId, int lastDocId, int length) {
+                    // This does not detect duplicate docids (e.g [1, 1, 2, 4] would be detected as dense),
+                    // this can happen with enrich or lookup. However this codec isn't used for enrich / lookup.
+                    // This codec is only used in the context of logsdb and tsdb, so this is fine here.
+                    return lastDocId - firstDocId == length - 1;
+                }
+
             };
         } else {
             final IndexedDISI disi = new IndexedDISI(
@@ -1430,7 +1478,7 @@ final class ES819TSDBDocValuesProducer extends DocValuesProducer {
 
     private record DocValuesSkipperEntry(long offset, long length, long minValue, long maxValue, int docCount, int maxDocId) {}
 
-    private static class NumericEntry {
+    static class NumericEntry {
         long docsWithFieldOffset;
         long docsWithFieldLength;
         short jumpTableEntryCount;
@@ -1445,7 +1493,7 @@ final class ES819TSDBDocValuesProducer extends DocValuesProducer {
         long valuesLength;
     }
 
-    private static class BinaryEntry {
+    static class BinaryEntry {
         long dataOffset;
         long dataLength;
         long docsWithFieldOffset;
@@ -1460,18 +1508,18 @@ final class ES819TSDBDocValuesProducer extends DocValuesProducer {
         DirectMonotonicReader.Meta addressesMeta;
     }
 
-    private static class SortedNumericEntry extends NumericEntry {
+    static class SortedNumericEntry extends NumericEntry {
         DirectMonotonicReader.Meta addressesMeta;
         long addressesOffset;
         long addressesLength;
     }
 
-    private static class SortedEntry {
+    static class SortedEntry {
         NumericEntry ordsEntry;
         TermsDictEntry termsDictEntry;
     }
 
-    private static class SortedSetEntry {
+    static class SortedSetEntry {
         SortedEntry singleValueEntry;
         SortedNumericEntry ordsEntry;
         TermsDictEntry termsDictEntry;
